@@ -1,6 +1,6 @@
-nd:=tools/ndisc_update
+nd:=tools/*
 linux:=$(nd) Linux/* 
-freebsd:=$(nd) FreeBSD/* tools/duid-uuid-update
+freebsd:=$(nd) FreeBSD/*
 
 all: preceed bsd bsdalt rpm rpmalt
 
@@ -25,6 +25,6 @@ bsdalt: $(freebsd)
 	for f in $^; do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/local/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/local/sbin/$${f##*/}\n\n" >> $@; done
 
 clean:
-	rm -f preceed bsdscript rpm rpmalt bsdalt
+	rm -f preceed bsd rpm rpmalt bsdalt
 
 .PHONY: all preceed rpm rpmalt bsd bsdalt clean distclean

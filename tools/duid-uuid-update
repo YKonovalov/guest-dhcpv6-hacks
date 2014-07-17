@@ -1,19 +1,65 @@
-#!/usr/local/bin/bash
-IFACE="${1:-$(ipv6_get_default_iface)}"
-LEASE=${2:-$(ipv6_get_default_lease_file)}
+#!/usr/bin/env bash
 export PATH=$PATH:/usr/local/sbin:/usr/local/bin
 
-duid="default-duid \"\000\004"
-for i in `dmidecode -s system-uuid|sed -e s/-//g -e "s/\(..\)/\1 /g"`; do
- num=`printf "%d" 0x$i`
- octnum=`printf "\%03o" 0x$i`
- if [ $num -lt 127 -a $num -gt 31 ]; then
-  octnum=`printf $octnum`
- fi
- duid=$duid$octnum
-done
-duid="$duid\";"
+ME=${0##*/}
 
-if [ "$(head -1 $LEASE 2>/dev/null)" != "$duid" ]; then
- echo "$duid" > $LEASE
-fi
+msg(){
+    echo "$1"
+    logger -t "${ME}[$$]" "$1"
+}
+
+IFACE="${1:-$(ipv6_get_default_iface)}"
+
+LEASES="
+duid_dhclient	/var/lib/dhclient/dhclient6-4929951a-86d6-4298-b053-f9cecfca7c1c-IFACE.lease
+duid_dhclient	/var/lib/dhclient/dhclient6-IFACE.leases
+duid_dhclient	/var/lib/dhclient/dhclient6.leases
+duid_dhclient	/var/lib/dhcp/dhclient6.IFACE.leases
+duid_dhclient	/var/lib/dhcp/dhclient6.leases
+duid_dhcpv6	/var/lib/dhcpv6/client6.leases /var/lib/dhcpv6/dhcp6c_duid
+"
+
+duid_dhclient(){
+ local lease_file="$1"
+    duid="default-duid \"\000\004"
+    for i in `dmidecode -s system-uuid|sed -e s/-//g -e "s/\(..\)/\1 /g"`; do
+	num=`printf "%d" 0x$i`
+	octnum=`printf "\%03o" 0x$i`
+	if [ $num -lt 127 -a $num -gt 31 ]; then
+	    octnum=`printf $octnum`
+	fi
+	duid=$duid$octnum
+    done
+    duid="$duid\";"
+
+    if [ "$(head -1 $lease_file 2>/dev/null)" != "$duid" ]; then
+    echo "$duid" > $lease_file
+    fi
+}
+
+duid_dhcpv6(){
+ local lease_file="$1"
+ local duid_file="$2"
+    ID="00 04 $(dmidecode -s system-uuid|sed -e s/-//g -e "s/\(..\)/\1 /g")" #"
+    N="$(printf %02X $(echo $ID|wc -w))"
+    REC="$(echo $N 00 $ID|tr [:lower:] [:upper:])"
+    CUR="$(echo $(od -A n -t x1 "$duid_file"|tr [:lower:] [:upper:]))"
+    if [ "$CUR" = "$REC" ]; then
+        echo "DUID is the same. Leaving lease file."
+        return 0
+    fi
+    for i in $REC; do
+        printf $(printf "\%03o" 0x$i)
+    done > "$duid_file"
+    msg "DUID updated to $ID (was $CUR)"
+    rm -f "$lease_file"
+}
+
+while read updater lease_file duid_file; do
+    if [ -d "${lease_file%/*}" ]; then
+	msg "Processing $updater: $lease_file"
+	$updater "$lease_file" "$duid_file"
+    fi
+done << EOF
+$(echo "$LEASES"|sed "s/IFACE/$IFACE/g")
+EOF
