@@ -1,0 +1,3 @@
+#!/bin/sh
+[ -z "$1" ] && exit
+ip -6 a l dev $1 scope link|awk '{if($1=="inet6")print $2}'|awk -F/ '{print $1}'|head -1

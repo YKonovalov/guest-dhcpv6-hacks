@@ -1,0 +1,1 @@
+ip -6 -o a s|grep " $1/"|cut -d" " -f2

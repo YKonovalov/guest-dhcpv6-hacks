@@ -1,0 +1,1 @@
+ifconfig -v|awk -v ip=$1 '/^[^[:blank:]]+:/ {split($1, i, ":");next}; {if($1=="inet6" && $2==ip)print i[1]}'

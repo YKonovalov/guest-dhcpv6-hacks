@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+msg(){
+	echo "$1"
+	logger -t "${ME}[$$]" "$1"
+}
+
+ipv6_hex(){
+  local ip n=
+  local -a quad
+   ip=$1
+    IFS=':' read -ra quad <<<"$ip"
+    for i in ${!quad[@]}; do
+	if [ -n "${quad[i]}" ]; then
+	    n="$n`printf "%04x" $((16#${quad[i]}))`"
+	else
+	    n="$n`printf "%0$(( (8-${#quad[@]}+1) * 4 ))x"`"
+	fi
+    done
+    echo $n
+}
+
+ipv6_expanded_from_hex(){
+  local hex=$1
+    echo $hex|sed -e "s/\(.\{4\}\)/\1:/g" -e "s/:$//"|tr '[:upper:]' '[:lower:]'
+}
+
+ipv6_expand(){
+  local ip hex
+   ip=$1
+    hex=$(ipv6_hex $ip)
+    echo $(ipv6_expanded_from_hex $hex)
+}
+
+plen_to_mask(){
+  local masklen octs ones zeros m
+   masklen=$1
+    octs=$((masklen/4))
+    ones=$( printf "%${plen}s" ' ' )
+    zeros=$( printf "%$((masklen-plen))s" ' ' ) #"
+    m=${ones// /1}${zeros// /0}
+    echo "ibase=2;obase=10000;$m"|bc
+}
+
+ipv6_masked_addr(){
+  local ip plen inc n mask masked inced
+   ip=$1
+   plen=$2
+   inc=${3:-1}
+    n=$(ipv6_hex $ip)
+    mask=$(plen_to_mask 128 $plen)
+    masked=$(printf "%016x%016x\n" $((16#${n:0:16} & 16#${mask:0:16})) $((16#${n:16:32} & 16#${mask:16:32}))|tr '[:lower:]' '[:upper:]')
+    inced=$(echo "obase=16;ibase=16;$masked + $inc"|bc)
+    echo $(ipv6_expanded_from_hex $inced)
+}
+
+IP= IFACE= MAC= EOPT= OUT=
+while true; do
+	IP=
+	case "${IP:=$1}" in
+		monitor)
+			msg "Waiting for permanent IPv6 address..."
+			O="$(ipv6_wait_for_global_permanent)"
+			if [ -z "$O" ]; then
+				msg "ERROR: Monitor exit with no result"
+				exit 1
+			else
+				set $O
+			fi
+			;;
+		"")
+			O="$(ipv6_get_global_permanent)"
+			if [ -z "$O" ]; then
+				msg "No permanent IPv6 addresses found"
+				set "monitor"
+			else
+				set $O
+			fi
+			;;
+		-h|--help)
+			echo "usage: $0 [monitor|{IPv6 address}] [interface] [mac]"
+			exit 0
+			;;
+		*)
+			break
+			;;
+	esac
+done
+IFACE="${2:-$(ipv6_get_iface_by_ip $IP)}"
+IFACE="${IFACE:-$(ipv6_get_default_iface)}"
+MAC="${3:-$(ipv6_get_mac_by_iface $IFACE)}"
+IPLL="$(ipv6_get_ipv6ll_by_iface $IFACE)"
+IPLL=${IPLL%%%*}
+IOPT="${IPLL:+src=\"$IPLL\"}"
+EOPT="${MAC:+src=\"$MAC\"}"
+MAC="${MAC:-auto}"
+
+msg "Setting $IP preffered"
+msg "$(ipv6_set_preffered $IP)"
+
+ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
+	addr_masked=$(ipv6_masked_addr $IP $len 0)
+	addr_net=$(ipv6_expand $net)
+	if [ "$addr_masked" = "$addr_net" ]; then
+		for target in $addr_masked $(ipv6_masked_addr $IP $len 1); do
+			if ping6 -c1 $target >/dev/null; then
+				msg "Target $target pinged OK"
+			else
+				msg "ERROR: Could not ping $target"
+			fi
+		done
+	fi
+done
+
+NA_SENDERS=
+SCAPY=/opt/scapy-2.2.0/run_scapy
+for S in $SCAPY $(which scapy); do
+	if [ -x "$S" ]; then
+		SCAPY=$S
+		NA_SENDERS="$NA_SENDERS send_na_using_scapy"
+	fi
+done
+
+NDSEND=$(which ndsend)
+if [ -x "$NDSEND" ]; then
+	NA_SENDERS="$NA_SENDERS send_na_using_ndsend"
+fi
+
+send_na_using_scapy(){
+ echo 'a=Ether('$EOPT')/IPv6('$IOPT')/ICMPv6ND_NA(tgt="'$IP'",R=0);sendp(a/ICMPv6NDOptDstLLAddr(lladdr=a.src),iface="'$IFACE'")'|
+ if OUT="$($SCAPY 2>&1)"; echo "$OUT"|grep ^Sent >/dev/null; then
+	return 0
+ else
+	echo "$@\n$OUT\n"|sed "s/[^[:print:]]*//g" >&2
+	return 1
+ fi
+}
+
+send_na_using_ndsend(){
+ $NDSEND $IP $IFACE
+}
+
+for sender in $NA_SENDERS; do
+	if $sender; then
+		msg "Unsolicited Neighbor Advertisement sent for $IP with mac $MAC via $IFACE from $IPLL"
+		break
+	fi
+done

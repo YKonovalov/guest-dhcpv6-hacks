@@ -1,0 +1,19 @@
+#!/usr/local/bin/bash
+IFACE="${1:-$(ipv6_get_default_iface)}"
+LEASE=${2:-$(ipv6_get_default_lease_file)}
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+duid="default-duid \"\000\004"
+for i in `dmidecode -s system-uuid|sed -e s/-//g -e "s/\(..\)/\1 /g"`; do
+ num=`printf "%d" 0x$i`
+ octnum=`printf "\%03o" 0x$i`
+ if [ $num -lt 127 -a $num -gt 31 ]; then
+  octnum=`printf $octnum`
+ fi
+ duid=$duid$octnum
+done
+duid="$duid\";"
+
+if [ "$(head -1 $LEASE 2>/dev/null)" != "$duid" ]; then
+ echo "$duid" > $LEASE
+fi

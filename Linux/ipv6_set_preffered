@@ -1,0 +1,15 @@
+IP=$1
+if [ -z "$IP" ]; then
+ echo "ERROR: specify IPv6 address" >&2
+ exit 1
+fi
+if ip -6 r g 2a02::|grep "src $IP" >/dev/null; then
+	echo $1 already preffered
+else
+	IFACE="${2:-$(ipv6_get_iface_by_ip $IP)}"	
+	if [ -z "$IFACE" ]; then
+		echo "ERROR: interface not found for $IP" >&2
+		exit 2
+	fi
+	echo "setting $1 preffered not yet supported"
+fi

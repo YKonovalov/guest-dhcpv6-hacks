@@ -1,0 +1,19 @@
+IP=$1
+if [ -z "$IP" ]; then
+ echo "ERROR: specify IPv6 address" >&2
+ exit 1
+fi
+IFACE="${2:-$(ipv6_get_iface_by_ip $IP)}"	
+if [ -z "$IFACE" ]; then
+	echo "ERROR: interface not found for $IP" >&2
+	exit 2
+fi
+if ifconfig $IFACE inet6|awk -v ip=$IP '{if($1=="inet6" && $2!~/%/)if($2==ip)exit 0;else exit 1}'; then
+	echo $1 already preffered
+else
+	ifconfig $IFACE inet6 |awk -v ip=$IP '{if($2!=ip && $5=="autoconf")print}'| while read addr; do
+	    echo "Setting $IP preffered by toggling deprecated flag of $addr"
+	    ifconfig $IFACE $addr deprecated
+	    ifconfig $IFACE $addr -deprecated
+	done
+fi

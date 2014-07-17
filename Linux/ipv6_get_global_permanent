@@ -1,0 +1,1 @@
+ip -6 -o a s scope global permanent|head -1|awk '{split($4,a,"/"); print a[1]" "$2}'
