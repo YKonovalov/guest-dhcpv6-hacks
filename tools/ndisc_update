@@ -98,33 +98,17 @@ IOPT="${IPLL:+src=\"$IPLL\"}"
 EOPT="${MAC:+src=\"$MAC\"}"
 MAC="${MAC:-auto}"
 
-msg "Setting $IP preffered"
-msg "$(ipv6_set_preffered $IP)"
-
-ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
-	addr_masked=$(ipv6_masked_addr $IP $len 0)
-	addr_net=$(ipv6_expand $net)
-	if [ "$addr_masked" = "$addr_net" ]; then
-		for target in $addr_masked $(ipv6_masked_addr $IP $len 1); do
-			if ping6 -c1 $target >/dev/null; then
-				msg "Target $target pinged OK"
-			else
-				msg "ERROR: Could not ping $target"
-			fi
-		done
-	fi
-done
 
 NA_SENDERS=
 SCAPY=/opt/scapy-2.2.0/run_scapy
-for S in $SCAPY $(which scapy); do
+for S in $SCAPY $(which scapy 2>/dev/null); do
 	if [ -x "$S" ]; then
 		SCAPY=$S
 		NA_SENDERS="$NA_SENDERS send_na_using_scapy"
 	fi
 done
 
-NDSEND=$(which ndsend)
+NDSEND=$(which ndsend 2>/dev/null)
 if [ -x "$NDSEND" ]; then
 	NA_SENDERS="$NA_SENDERS send_na_using_ndsend"
 fi
@@ -147,5 +131,22 @@ for sender in $NA_SENDERS; do
 	if $sender; then
 		msg "Unsolicited Neighbor Advertisement sent for $IP with mac $MAC via $IFACE from $IPLL"
 		break
+	fi
+done
+
+msg "Setting $IP preffered"
+msg "$(ipv6_set_preffered $IP)"
+
+ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
+	addr_masked=$(ipv6_masked_addr $IP $len 0)
+	addr_net=$(ipv6_expand $net)
+	if [ "$addr_masked" = "$addr_net" ]; then
+		for target in $addr_masked $(ipv6_masked_addr $IP $len 1); do
+			if ping6 -c1 $target >/dev/null; then
+				msg "Target $target pinged OK"
+			else
+				msg "ERROR: Could not ping $target"
+			fi
+		done
 	fi
 done
