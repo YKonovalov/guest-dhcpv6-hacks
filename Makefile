@@ -14,10 +14,9 @@ rpm: $(linux)
 	for f in $^; do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/sbin/$${f##*/}\n\n" >> $@; done
 
 bsd: $(freebsd)
-	cat /dev/null > $@
+	cat yc2/yc2-init-setup > $@
 	for f in $^; do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/local/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/local/sbin/$${f##*/}\n\n" >> $@; done
 	for f in $(yc2); do echo "base64 --decode <<< $$(base64 -w0 $$f) >/yc2/$${f##*/}" >> $@; printf "chmod a+x /yc2/$${f##*/}\n\n" >> $@; done
-	cat $@
 
 altrpm: $(linux)
 	cat /dev/null > $@
