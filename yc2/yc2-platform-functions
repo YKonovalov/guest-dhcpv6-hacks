@@ -1,0 +1,83 @@
+#!/bin/sh -efu
+
+OS=$(uname -o)
+case "$OS" in
+    "Cygwin")
+	WROOTDIR=$(cd $WINDIR; pwd)
+	HOSTSF="$WROOTDIR/system32/Drivers/etc/hosts"
+	CONVTO='sed -e s/$/\r/'
+	CONVFROM='sed -e s/\r//'
+	CURL=curl
+	;;
+    "GNU/Linux")
+	HOSTSF=/etc/hosts
+	CONVTO='cat -'
+	CONVFROM='cat -'
+	CURL=curl
+	;;
+    "FreeBSD")
+	HOSTSF=/etc/hosts
+	CONVTO='cat -'
+	CONVFROM='cat -'
+	CURL=/usr/local/bin/curl
+	;;
+    *)
+	dolog "Unknown OS. Assume unix"
+	HOSTSF=/etc/hosts
+	CONVTO='cat -'
+	CONVFROM='cat -'
+	CURL=curl
+	;;
+esac
+
+do_rhel_hacks()
+{
+dolog "Hacking Avahi conf"
+sed  -i -e "s/^use-ipv6=yes/use-ipv6=no/" \
+    -e "s/^#add-service-cookie=yes/add-service-cookie=no/" \
+    -e "s/^enable-wide-area=.*/enable-wide-area=no/" \
+    -e "s/^#publish-workstation=yes/publish-workstation=no/" /etc/avahi/avahi-daemon.conf
+
+[ -f /etc/avahi/services/sftp-ssh.service ] && mv /etc/avahi/services/sftp-ssh.service /etc/avahi/services/sftp-ssh.service--orig
+
+dolog "Hacking serial console"
+sed -i -e "s;co:2345:respawn:/sbin/agetty xvc0 9600 vt100-nav;co:2345:respawn:/sbin/agetty ttyS0 9600 vt100-nav;" \
+    /etc/inittab                                                                                                   
+kill -1 1                                                                                                          
+echo "Hi there" >/dev/ttyS0
+}
+
+do_platform_hacks()
+{
+case "$OS" in
+    "Cygwin")
+	;;
+    "GNU/Linux")
+	do_rhel_hacks
+	;;
+    *)
+	dolog "Unknown OS. Nothing to hack"
+	;;
+esac
+}
+
+do_resize_root()
+{
+case "$OS" in
+    "FreeBSD")
+	D=$(sysctl kern.disks|awk '{print $2}')
+	D=${D%%,*}
+	if gpart status $D|grep CORRUPT >/dev/null; then
+	    dolog "Resizing disk $D"
+	    gpart recover $D
+	    uname -r|grep '9\..*' >/dev/null && sysctl kern.geom.debugflags=16
+	    gpart resize -i 3 $D
+	    uname -r|grep '9\..*' >/dev/null && sysctl kern.geom.debugflags=0
+	    growfs -y /
+	fi
+	;;
+    *)
+	dolog "Don't know how to resize disk in $OS OS. Disk resize skipped."
+	;;
+esac
+}

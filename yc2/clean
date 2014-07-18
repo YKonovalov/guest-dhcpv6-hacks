@@ -1,0 +1,21 @@
+#!/bin/sh
+# options -efu do not work in cygwin. Nevermind :)
+# This script works in Linux and Cygwin
+#
+
+DIR="${0%/*}"
+. "$DIR/yc2-sh-functions"
+. "$DIR/yc2-platform-functions"
+. "$DIR/yc2-ec2-functions"
+
+IAMTHEHOST=$(hostname)
+
+# Set instance name as a hostname
+dolog "Clean up host for new life: $IAMTHEHOST"
+cleanup_hosts
+cleanup_hostname
+cleanup_resolvconf
+cleanup_ssh_hostkeys
+cleanup_ssh_userkeys
+cleanup_history
+cleanup_logs

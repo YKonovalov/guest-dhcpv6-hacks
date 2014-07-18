@@ -1,0 +1,451 @@
+#!/bin/sh -efu
+
+LOG=/var/log/yc2-tools.log
+# EC2 metadata URL
+metadata_service_url=http://169.254.169.254
+
+
+dolog() {
+    printf %s\\n "$(date) $PROG: $*" |tee -a $LOG >&2
+}
+
+ec2curl()
+{
+    $CURL --connect-timeout 1 -m 2 -s "$1" 2>/dev/null
+}
+
+ssh_default_key_user()
+{
+case "$OS" in
+    "Cygwin")
+	echo Administrator
+	;;
+    "GNU/Linux"|"FreeBSD")
+	echo cloud-user
+	;;
+    *)
+	dolog "Unknown OS. assume unix"
+	echo cloud-user
+esac
+}
+
+create_user()
+{
+local user=$1
+case "$OS" in
+    "GNU/Linux")
+	useradd $user
+	;;
+    "FreeBSD")
+	pw useradd -n $user -g wheel -s /usr/local/bin/bash -m -c "Default cloud user"
+	echo -e $user'\tALL=(ALL)\tNOPASSWD: ALL' >> /usr/local/etc/sudoers
+	;;
+    *)
+	dolog "Unknown OS. assume unix"
+	useradd $user
+esac
+}
+
+# Installs ssh key from EC2
+instance_get_key()
+{
+    local keys="$(ec2curl "$metadata_service_url/latest/meta-data/public-keys")"
+    if [ $? -eq 0 ]; then
+        local firstkey="$(echo "$keys"|head -1|grep '^[[:digit:]]\+=[[:alnum:]]\+')"
+        local firstkey_id=${firstkey%%=*}
+        local firstkey_name=${firstkey##*=}
+        if [ "$(echo "$firstkey_id"|grep "^[[:digit:]]$")" != "" ]; then
+            firstkey="$(ec2curl "$metadata_service_url/latest/meta-data/public-keys/$firstkey_id/openssh-key")"
+            if [ "$(echo "$firstkey"|grep ssh-rsa)" != "" ]; then
+                dolog "got ssh-rsa key number $firstkey_id with name \"$firstkey_name\""
+                local user="$(ssh_default_key_user)"
+                if ! id $user >/dev/null 2>&1; then
+		    create_user $user
+                fi
+                local home="$(getent passwd|grep "^$user:"|cut -d: -f6)" #"
+                if [ -d "$home" ]; then
+		    dolog "installing ssh-rsa key \"$firstkey_name\" to user \"$user\" authorized_keys file"
+            	    [ -d $home/.ssh ] || mkdir -p $home/.ssh && chmod 700 $home/.ssh && chown $user $home/.ssh || dolog "failed to create .ssh directory for user $user"
+            	    (cat $home/.ssh/authorized_keys; echo "$firstkey")|uniq > $home/.ssh/authorized_keys && chmod 644 $home/.ssh/authorized_keys && chown $user $home/.ssh/authorized_keys || dolog "failed to create authorized_keys for user $user"
+            	else
+            	    dolog "home directory for user $user does not exists $home. Not installing ssh-rsa key \"$firstkey_name\" to local user \"$LOGNAME\" authorized_keys file"
+            	fi
+
+            	lock_key="no-port-forwarding,no-agent-forwarding,no-X11-forwarding,command=\"echo 'Please login as the user \\\"$user\\\" rather than the user \\\"root\\\".';echo;sleep 10\""
+            	dolog "installing locked ssh-rsa key \"$firstkey_name\" to user \"root\" authorized_keys file"
+            	[ -d /root/.ssh ] || mkdir -p /root/.ssh && chmod 700 /root/.ssh && chown root /root/.ssh || dolog "failed to create .ssh directory for user root"
+            	(cat /root/.ssh/authorized_keys; echo "$lock_key $firstkey")|uniq > /root/.ssh/authorized_keys && chmod 644 /root/.ssh/authorized_keys && chown root /root/.ssh/authorized_keys || dolog "failed to create authorized_keys for user root"
+            else
+                dolog "key with id $firstkey_id and name \"$firstkey_name\" is not valid ssh key"
+            fi
+        else
+	    dolog "no ssh key available for instance in EC2"
+        fi
+    else
+	dolog "error $? reported from EC2 on ssh-keys list request"
+    fi
+}
+
+# usage: instance_get_metadata <parameter>
+instance_get_metadata()
+{
+    $CURL --connect-timeout 1 -m 2 -s "$metadata_service_url/latest/meta-data/$1" ||:
+}
+
+# usage: instance_get_userdata <parameter>
+# user data format: arg1=value1 arg2=value2 arg3=value3
+instance_get_userdata()
+{
+    quote_sed_regexp_variable key "$1"
+    $CURL --connect-timeout 1 -m 2 -s "$metadata_service_url/latest/user-data"|
+        sed -n "s/\(^[[:space:]]*\|.*[[:space:]]\+\)$key=\([^[:space:]]\+\).*/\2/p"
+}
+avahi_preparce_scan()
+{
+sed -n "/^=.*IPv4/,+4  p"| sed -ne "s/\(^=\)\(.*\)/-=###=-#\2-=###=-/I;H
+$ {
+  x
+  s/\n//g
+  p}
+" | sed -ne "H
+$ {
+  x
+  s/-=###=-/\n/g
+  p}
+"| \
+    sed -e "s/[[:blank:]]\+hostname = \[\(.*\)\][[:blank:]]\+address = \[\(.*\)\][[:blank:]]\+port = \[\(.*\)\][[:blank:]]\+txt = \[\(.*\)\]/\2	\1	\3	\4/"| \
+    grep -v "^$"
+}
+
+avahi_parced_to_hosts()
+{
+    sed "/^[[:blank:]]*[^#]\+/ s/\([^[:blank:]]\+\)[[:blank:]]\+\([^[:blank:]]\+\)[[:blank:]]\+\(.*\)/\1 \2 # port=\3/" | \
+    sed "/^[[:blank:]]*[^#]\+/ s/\([^[:blank:]]\+\)[[:blank:]]\+\([^[:blank:]]\+\)\.\([^[:blank:]]\+\)\(.*\)/\1 \2 \2.\3 \4/" | \
+    sed -e "s/\.local\([[:blank:]]\+\)/.localdomain\1/" | \
+    sed "/^[[:blank:]]*[^#]\+/ s/\([^[:blank:]]\+\) *\([^[:blank:]]\+\) *\([^[:blank:]]\+\) *\(#.*instance=\)\([^[:blank:].]\+\)\.\([^[:blank:]]\+\)\(\".*\)/\1 \2 \3 \5 \5.\6/"
+}
+
+avahi_parced_to_table()
+{
+    grep -v "^#"|sed -e "s/\.local\([[:blank:]]\+\)/.localdomain\1/"
+}
+
+# Updates hosts file with new entry safely 
+# Supports unix and windows way
+#
+update_hosts()
+{
+local HOSTSC="$(cat $HOSTSF|$CONVFROM)"
+
+while read ip names; do
+    HOSTSC="$(echo "$HOSTSC"|sed -e "/^$ip.*$names/ d")
+$ip $names"
+done
+echo "$HOSTSC"|$CONVTO >$HOSTSF
+}
+
+cleanup_hosts()
+{
+    dolog "cleaning up hosts"
+    sed -i -e "/i-[0-9A-F]\{8\}/ d" "$HOSTSF"
+}
+
+cleanup_resolvconf()
+{
+    dolog "cleaning up resolv.conf"
+    cat /dev/null >/etc/resolv.conf
+}
+
+cleanup_hostname()
+{
+    final_hostname="localhost.localdomain"
+    dolog "cleaning up hostname"
+    [ -e /etc/sysconfig/network ] && sed -i -e "s/^HOSTNAME=.*/HOSTNAME=$final_hostname/" /etc/sysconfig/network
+    [ -e /etc/rc.conf ] && sed -i -e "s/^hostname=.*/hostname=\"$final_hostname\"/" /etc/rc.conf
+    hostname $final_hostname
+}
+
+cleanup_ssh_hostkeys()
+{
+    local keys_dir=/etc/ssh
+    dolog "cleaning up hostkeys at $keys_dir"
+    rm -f "$keys_dir"/ssh_host*key*
+}
+
+cleanup_ssh_userkeys()
+{
+    local user="$(ssh_default_key_user)"
+    local userhome="$(getent passwd|grep "^$user:"|cut -d: -f6)" #"
+    for home in $userhome /root; do
+	if [ -f "$home/.ssh/authorized_keys" ]; then
+	    dolog "cleaning up authorized_keys at $home"
+	    cat /dev/null > "$home/.ssh/authorized_keys" || dolog "failed to clean up authorized_keys in $home"
+	else
+	    dolog "WARNING: authorized_keys file does not exists at $home."
+	fi
+    done
+}
+
+cleanup_logs()
+{
+    dolog "cleaning up logs"
+    for i in /var/log/messages $LOG; do
+	cat /dev/null > "$i"
+    done
+}
+
+cleanup_history()
+{
+    local user="$(ssh_default_key_user)"
+    local home="$(getent passwd|grep "^$user:"|cut -d: -f6)" #"
+    for dir in /root $home; do
+	dolog "cleaning up history in $dir"
+	for i in "$dir/.bash_history" "$dir/.history"; do
+	    cat /dev/null > "$i"
+	done
+    done
+}
+
+
+
+# Scan and prints results of ZeroConf searches in form of:
+#   ip hostname port "txtrecord"
+# also adds record to hosts file
+
+zeroconf_scan_service()
+{
+local parced=""
+local hosts=""
+
+case "$OS" in
+    "Cygwin")
+	parced="$($DIR/win/bonjour-browse $service)"
+	;;
+    "GNU/Linux")
+	parced="$(avahi-browse -rtlk "_$service._tcp"|avahi_preparce_scan)"
+	;;
+    *)
+	dolog "Unknown OS. No scan"
+esac
+
+if [ -n "$parced" ]; then
+    hosts="$(echo "$parced"|avahi_parced_to_hosts)"
+    if [ -n "$hosts" ]; then
+	echo "$hosts"| update_hosts
+    else
+        dolog "avahi_scan_service: no hosts to add"
+    fi
+    # real answer
+	echo "$parced"|avahi_parced_to_table
+fi
+}
+
+
+zeroconf_publish_service()
+{
+case "$OS" in
+    "Cygwin")
+	bonjour_publish_service $1 $2 "$3" "$4"
+	;;
+    "GNU/Linux")
+	avahi_publish_service $1 $2 "$3" "$4"
+	;;
+    *)
+	dolog "Unknown OS. Not publishing ZeroConf service"
+esac
+}
+
+bonjour_publish_service_old()
+{
+local service=$1
+local port=$2
+local txt="$3"
+local name="$4"
+dns-sd -R "$name" _$service._tcp . $port "$txt" 2>&1 >$LOG-dns-sd-$service &
+}
+
+bonjour_publish_service()
+{
+local service=$1
+local port=$2
+local txt="$3"
+local name="$4"
+local dnssd="$(which dns-sd)"
+
+# write service script
+echo "#!/bin/bash
+$dnssd -R "\"$name\"" _$service._tcp . $port \""$txt\"" 2>&1 >$LOG-dns-sd-$service
+" >"$DIR/win/zeroconf-$service.sh"
+
+# make it executable
+local service_exe="$(realpath $DIR/win/zeroconf-$service.sh)"
+chmod a+x "$service_exe"
+
+# Stop service if running
+if cygrunsrv -Q $service|grep 'Current State[[:blank:]]*:[[:blank:]]*Running' >/dev/null 2>&1; then
+    cygrunsrv --stop $service >/dev/null 2>&1 || dolog "failed to stop service: $service"
+else
+    # Not registered, then register
+    if ! cygrunsrv --list|grep "^$service$" 2>&1 >/dev/null; then
+        dolog "creating cygwin service for zeroconf $service"
+        cygrunsrv -I $service -d "YC2 zeroconf or bonjour service to announce $service role" \
+            -p "$service_exe" \
+            -y tcpip "${cygwin_env[@]}"|| dolog "failed to publish service: $service"
+    fi
+fi
+
+cygrunsrv --start $service >/dev/null 2>&1 || dolog "failed to start service: $service"
+
+if cygrunsrv -Q $service >/dev/null 2>&1; then
+    dolog "Service $service is running"
+else
+    dolog "Something went wrong running the $service zeroconf service."
+fi
+}
+
+avahi_publish_service()
+{
+local service=$1
+local port=$2
+local txt="$3"
+local name="$4"
+# publish service in avahi
+cat <<EOF >/etc/avahi/services/$service.service
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+    <name replace-wildcards="yes">$name at %h</name>
+    <service>
+	<type>_$service._tcp</type>
+	<port>$port</port>
+	<txt-record>$txt</txt-record>
+    </service>
+</service-group>
+EOF
+service avahi-daemon restart
+}
+
+get_local_ip()
+{
+case "$OS" in
+    "Cygwin")
+	ipconfig|grep 'IP Address'|head -1|sed -e "s/.*: \(.*\)\r.*/\1/"
+	;;
+    "GNU/Linux")
+	ip addr |grep "inet "|grep -v 127.0.0.1|awk '{print $2}'|sed -e "s:/.*::"|head -1
+	;;
+    *)
+	dolog "Unknown OS. Sorry"
+esac
+}
+
+# set hostname to the one obtained from ec2,
+# then add specified alias to hosts file 
+set_ec2_hostname()
+{
+static_fqdn="$1"
+max_tries=${2-10}
+
+# get default domain value
+
+host_def_fqdn="$static_fqdn"
+[ -n "$host_def_fqdn" ] || host_def_fqdn="${DEF_FQDN:-localhost.cloud.yc2.local}"
+
+host_def_domain="$DEF_DOMAIN"
+
+# get runtime information
+for i in $(seq 1 "$max_tries"); do
+    dolog "asking ec2 for hostname"
+    host_name="$(instance_get_metadata hostname)"
+    [ -z "$host_name" ] || break
+    sleep $(($i*2))
+done
+
+if [ $(echo "$host_name"|wc -w) -ne 1 ]; then
+    dolog "junk of $(echo $host_name|wc -w) words recieved intead of hostname. Setting to default hostname $host_def_fqdn"
+    host_name="$host_def_fqdn"
+fi
+
+dolog "got $host_name on try #$i"
+[ -n "$host_name" ] || host_name=$static_fqdn
+
+host_domain="$(instance_get_userdata domain)"
+if [ $(echo "$host_domain"|wc -w) -ne 1 ]; then
+    dolog "junk of $(echo $host_domain|wc -w) words recieved intead of domain. Setting to default domain $host_def_domain"
+    host_domain="$host_def_domain"
+fi
+
+if echo "$host_name"| grep "\." >/dev/null; then
+    final_hostname=$host_name
+else
+    final_hostname=$host_name${host_domain:+.$host_domain}
+fi
+
+# update hostname
+[ -e /etc/sysconfig/network ] && sed -i -e "s/^HOSTNAME=.*/HOSTNAME=$final_hostname/" /etc/sysconfig/network
+[ -e /etc/rc.conf ] && sed -i -e "s/^hostname=.*/hostname=\"$final_hostname\"/" /etc/rc.conf
+hostname $final_hostname
+
+# bind hostname to local ip
+
+host_ip="$(instance_get_metadata local-ipv4)"
+if [ $(echo "$host_ip"|wc -w) -ne 1 ]; then
+    dolog "junk of $(echo "$host_ip"|wc -w) words recieved intead of ip"
+    host_ip=$(get_local_ip)
+    dolog "Setting ip to what is already set $host_ip"
+fi
+if [ -n "$host_ip" ]; then
+    printf '%s	%s	%s	%s\n' "$host_ip" "$static_fqdn" "$final_hostname" "$host_name" |update_hosts
+fi
+
+# output our best guess for EC2 instance name
+echo "$final_hostname"
+
+}
+
+GoGetIt()
+{
+local service=$1
+local defname=$2
+local defport=$3
+local try=$4
+
+	HOST="$(instance_get_userdata $service)"
+	PORT=$defport
+	if [ $(echo $HOST|wc -w) -ne 1 ]; then
+	    #dolog "junk of $(echo $HOST|wc -w) words recieved intead of hostname. Invalueating data."
+	    HOST=""
+	fi
+	        
+	if [ -z "$HOST" ]; then
+	    # try zeroconf
+	    avahi_first="$(zeroconf_scan_service $service|head -1)"
+	    local ip="$(echo "$avahi_first"|awk '{print $1}')"
+	    if valid_ipv4 "$ip"; then
+		HOST="$(echo "$avahi_first"|awk '{print $2}')"
+		PORT="$(echo "$avahi_first"|awk '{print $3}')"
+		if [ -z "$HOST" ]; then
+		    dolog "Wierd. Got ip but no name $service:$ip"
+		else
+		    dolog "$service is on $HOST:$PORT by zeroconf on try #$try"
+		    echo "$HOST $PORT"
+		fi
+	    else
+		if [ "$ip" != "" ]; then
+		    dolog "$service is on non-IPv4 address $ip by zeroconf on try #$try"
+		else
+		    if [ $try -gt 100 ]; then
+                        # all fails, so we will use the defaults
+                        HOST=$defname
+                        PORT=$defport
+                        dolog "Giving in on $service discovery. Tryied $try times. Using build-in default name"
+                        echo "$HOST $PORT"
+                    fi
+		fi
+	    fi
+	else
+	    dolog "$service is on $HOST:$PORT by userdata on try #$try"
+	    echo "$HOST $PORT"
+	fi
+}
+

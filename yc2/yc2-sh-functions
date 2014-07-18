@@ -1,0 +1,318 @@
+#!/bin/sh -efu
+
+# {{{ shell-version
+# This file is covered by the GNU General Public License,
+# which should be included with libshell as the file LICENSE.
+# All copyright information are listed in the COPYING.       
+
+if [ -z "${__included_shell_version-}" ]; then
+__included_shell_version=1                    
+
+libshell_version=2
+
+__export_compatibility_string_quote_remove=1
+
+fi #__included_shell_version
+# }}} shell-version         
+# {{{ shell-error           
+# This file is covered by the GNU General Public License,
+# which should be included with libshell as the file LICENSE.
+# All copyright information are listed in the COPYING.       
+
+if [ -z "${__included_shell_error-}" ]; then
+__included_shell_error=1                    
+
+PROG="${PROG:-${0##*/}}"
+
+message() {
+        printf %s\\n "$PROG: $*" >&2
+}                                   
+
+fatal() {
+        message "$@"
+        exit 1      
+}                   
+
+quiet="${quiet-}"
+verbose="${verbose-}"
+verbose() {          
+        [ -n "$verbose" ] || return 0
+        message "$@"                 
+}                                    
+
+fi #__included_shell_error
+# }}} shell-error         
+# {{{ shell-quote         
+# This file is covered by the GNU General Public License,
+# which should be included with libshell as the file LICENSE.
+# All copyright information are listed in the COPYING.       
+
+if [ -z "${__included_shell_quote-}" ]; then
+__included_shell_quote=1                    
+
+# Quote argument for sed basic regular expression and store result into variable.
+# Usage example:                                                                 
+# quote_sed_regexp_variable var_pattern "$pattern"                               
+# quote_sed_regexp_variable var_replace "$replace"                               
+# sed "s/$var_pattern/$var_replace/"                                             
+quote_sed_regexp_variable() {                                                    
+        local __quote_set_regexp_variable_var __quote_set_regexp_variable_out    
+        __quote_set_regexp_variable_var="$1"; shift                              
+        __quote_set_regexp_variable_out="$*"                                     
+        if [ -z "${__quote_set_regexp_variable_out##*[\[\].*&^\$\\\\/]*}" ]; then
+                __quote_set_regexp_variable_out="$(printf %s "$__quote_set_regexp_variable_out" |
+                                sed -e 's/[].*&^$[\/]/\\&/g')" ||                                
+                        return 1                                                                 
+        fi                                                                                       
+        eval "$__quote_set_regexp_variable_var=\"\$__quote_set_regexp_variable_out\""            
+}                                                                                                
+
+# Quote given arguments for sed basic regular expression.
+# Usage example: sed "s/$(quote_sed_regexp "$var_pattern")/$(quote_sed_regexp "$var_replacement")/"
+quote_sed_regexp() {                                                                               
+        local result                                                                               
+        quote_sed_regexp_variable result "$@"                                                      
+        printf %s "$result"                                                                        
+}                                                                                                  
+
+# Quote argument for shell and store result into variable.
+# Usage example:                                          
+# quote_shell_variable var_name "$var_value"              
+# printf '%s\n' "$var_name"                               
+quote_shell_variable() {                                  
+        local __quote_shell_variable_var __quote_shell_variable_out
+        __quote_shell_variable_var="$1"; shift                     
+        __quote_shell_variable_out="$*"                            
+        if [ -z "${__quote_shell_variable_out##*[\"\$\`\\\\]*}" ]; then
+                __quote_shell_variable_out="$(printf %s "$__quote_shell_variable_out" |
+                                sed -e 's/[\"$\`\\]/\\&/g')" ||                        
+                        return 1                                                       
+        fi                                                                             
+        eval "$__quote_shell_variable_var=\"\$__quote_shell_variable_out\""            
+}                                                                                      
+
+# Quote argument for shell.
+# Usage example: eval "$var_name=\"$(quote_shell "$var_value")\""
+quote_shell() {                                                  
+        local result                                             
+        quote_shell_variable result "$@"                         
+        printf %s "$result"                                      
+}                                                                
+
+# Quote argument for shell and store result into variable.
+#                                                         
+# Usage example:                                          
+# quote_shell_args args "$var_args"                       
+# eval "set -- $args"                                     
+quote_shell_args() {                                      
+# This is an internal function to avoid the use of ugly namespace.
+__quote_shell_args() {                                            
+        local m= r= c= l="$1"                                     
+        # backslash/double/single quote mode                      
+        local bq= dq= sq=                                         
+
+        __quote_shell_args_toggle() {
+                # toggle $1 value    
+                eval [ -n \"\$$1\" ] && eval "$1=" || eval "$1=\$$2"
+        }                                                           
+
+        while [ ${#m} -lt $((${#l}-1)) ]; do
+                m="$m?"                     
+        done                                
+
+        while [ -n "$l" ]; do
+                c="${l%$m}"  
+                l="${l#?}"   
+                m="${m#?}"   
+
+                case "$c" in
+                        \") 
+                                # toggle double quote mode unless
+                                # in backslash or single quote mode
+                                [ -n "$bq$sq" ] || __quote_shell_args_toggle dq c
+                                ;;                                               
+                        \')                                                      
+                                # toggle single quote mode unless                
+                                # in backslash or double quote mode              
+                                [ -n "$bq$dq" ] || __quote_shell_args_toggle sq c
+                                ;;                                               
+                        \$|\`)                                                   
+                                # quote special character unless                 
+                                # in backslash or single quote mode              
+                                [ -n "$bq$sq" ] || bq=\\                         
+                                ;;                                               
+                        \\)                                                      
+                                # toggle backslash quote mode unless             
+                                # in single quote mode                           
+                                if [ -z "$sq" ]; then                            
+                                        if [ -z "$bq" ]; then                    
+                                                # enter backslash quote mode     
+                                                bq=\\                            
+                                                continue                         
+                                        else                                     
+                                                # leave backslash quote mode     
+                                                r="$r\\"                         
+                                                bq=                              
+                                        fi                                       
+                                fi                                               
+                                ;;                                               
+                        [!A-Za-z0-9_\ \ ])                                       
+                                # quote non-regular character unless             
+                                # in any quote mode                              
+                                [ -n "$bq$dq$sq" ] || bq=\\                      
+                                ;;                                               
+                esac                                                             
+                r="$r$bq$c"                                                      
+                # leave backslash quote mode if any                              
+                bq=                                                              
+        done                                                                     
+
+        [ -z "$bq$dq$sq" ] ||
+                { message "unmatched character ($bq$dq$sq) found"; return 1; }
+        __quote_shell_args_out="$r"                                           
+}                                                                             
+        local __quote_shell_args_out= __quote_shell_args_rc=0                 
+        __quote_shell_args "$2" ||                                            
+                __quote_shell_args_rc=1                                       
+        eval "$1=\"\$__quote_shell_args_out\""                                
+
+        # Remove internal functions from user namespace.
+        unset __quote_shell_args __quote_shell_args_toggle
+
+        return $__quote_shell_args_rc
+}                                    
+
+if [ -n "${__export_compatibility_string_quote_remove-}" ]; then
+# Obsolete function. You shouldn't use it.                      
+string_quote_remove() {                                         
+        local out="$1"                                          
+        if [ -z "${1##*\'}${1%%\'*}" ]; then                    
+                out="${1#\'}"                                   
+                out="${out%\'}"                                 
+        elif [ -z "${1##*\"}${1%%\"*}" ]; then                  
+                out="${1#\"}"                                   
+                out="${out%\"}"                                 
+        fi                                                      
+        printf %s "$out"                                        
+}                                                               
+fi # __export_compatibility_string_quote_remove                 
+
+fi #__included_shell_quote
+# }}} shell-quote         
+# {{{ shell-signal        
+# This file is covered by the GNU General Public License,
+# which should be included with libshell as the file LICENSE.
+# All copyright information are listed in the COPYING.       
+
+if [ -z "${__included_shell_signal-}" ]; then
+__included_shell_signal=1                    
+
+__shell_signal_handlers=
+# Set handler code whan any of the specified signals are received.
+# Return code of handler function will be ignored. Special handlers is
+# SIG_IGN and SIG_DFL (See signal(2)).                                
+#                                                                     
+# Usage example:                                                      
+# signal_handler 'echo $rc' TERM EXIT HUP                             
+# signal_handler SIG_IGN TERM EXIT HUP                                
+# signal_handler SIG_DFL TERM EXIT HUP                                
+signal_handler() {                                                    
+        local user_action real_action                                 
+        user_action="$1"                                              
+        shift                                                         
+
+        __shell_signal_handler() {
+                local s rc=$? sign="$1"
+                local IFS='            
+'                                      
+                eval set -- ${__shell_signal_handlers-}
+                for s; do                              
+                        [ -n "${s##$sign:*}" ] ||      
+                                eval ${s#$sign:} $rc ||:
+                done                                    
+        }                                               
+
+        __shell_signal_append() {
+                local s arg="$1" 
+                local IFS='      
+'                                
+                eval set -- ${__shell_signal_handlers-}
+                for s; do                              
+                        [ "$s" != "$arg" ] || return 0 
+                done                                   
+                quote_shell_variable arg "$arg"        
+                __shell_signal_handlers="$__shell_signal_handlers \"$arg\""
+        }                                                                  
+
+        __shell_signal_remove() {
+                local s sign="$1"
+                local IFS='      
+'                                
+                eval set -- ${__shell_signal_handlers-}
+                __shell_signal_handlers=               
+                for s; do                              
+                        [ -n "${s##$sign:*}" ] ||      
+                                continue               
+                        quote_shell_variable s "$s"    
+                        __shell_signal_handlers="$__shell_signal_handlers \"$s\""
+                done                                                             
+        }                                                                        
+
+        for sign; do
+                sign="${sign#SIG}"
+
+                case "$user_action" in
+                        SIG_IGN)      
+                                __shell_signal_remove "$sign"
+                                real_action=:                
+                                ;;                           
+                        SIG_DFL)                             
+                                __shell_signal_remove "$sign"
+                                real_action=-                
+                                ;;                           
+                        *)                                   
+                                __shell_signal_append "$sign:$user_action"
+                                real_action="__shell_signal_handler $sign"
+                                ;;                                        
+                esac                                                      
+                trap "$real_action" "$sign"                               
+        done                                                              
+}                                                                         
+
+# Set exit handler. Return code of handler function will be ignored.
+#                                                                   
+# Usage example:                                                    
+# exit_function() { echo "Exit with return code '$1'"; }            
+# set_cleanup_handler exit_function                                 
+__cleanup_handler_name=                                             
+set_cleanup_handler() {                                             
+        __cleanup_handler_name="${1-}"                              
+        __cleanup_handler() {                                       
+                trap - EXIT                                         
+                [ -z "${__cleanup_handler_name-}" ] ||              
+                        "$__cleanup_handler_name" "$1" ||:          
+                exit "$1"                                           
+        }                                                           
+        signal_handler '__cleanup_handler $rc' EXIT                 
+        signal_handler '__cleanup_handler   1' HUP PIPE INT QUIT TERM
+}                                                                    
+
+# Remove exit handler.
+#                     
+# Usage example: unset_cleanup_handler
+unset_cleanup_handler() {             
+        signal_handler SIG_DFL EXIT HUP PIPE INT QUIT TERM
+        __cleanup_handler_name=                           
+}                                                         
+
+fi #__included_shell_signal
+# }}} shell-signal         
+
+valid_ipv4()
+{
+    local ip="$1"
+    local regex_byte='\([01]\?[0-9][0-9]\?\|2[0-4][0-9]\|25[0-5]\)'
+    local regex_ipaddr="$regex_byte\(\.$regex_byte\)\{3\}"
+
+    [ -n "$ip" -a -z "$(printf %s "$ip" | sed -e "s/^$regex_ipaddr\$//")" ]
+}
