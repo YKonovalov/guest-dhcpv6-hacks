@@ -7,7 +7,7 @@ all: preceed bsd rpm
 
 preceed: $(linux)
 	cat /dev/null > $@
-	for f in $^; do echo "    echo $$(base64 -w0 $$f)|in-target base64 -d >/usr/sbin/$${f##*/}; \\" >> $@; echo "    chmod a+x /target/usr/sbin/$${f##*/}; \\" >> $@; done
+	for f in $^; do echo "    echo $$(base64 -w0 $$f)|/target/usr/bin/base64 -d >/target/usr/sbin/$${f##*/}; \\" >> $@; echo "    chmod a+x /target/usr/sbin/$${f##*/}; \\" >> $@; done
 
 rpm: $(linux)
 	cat /dev/null > $@

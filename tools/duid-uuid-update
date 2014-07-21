@@ -23,7 +23,7 @@ duid_dhcpv6	/var/lib/dhcpv6/client6.leases /var/lib/dhcpv6/dhcp6c_duid
 duid_dhclient(){
  local lease_file="$1"
     duid="default-duid \"\000\004"
-    for i in `dmidecode -s system-uuid|sed -e s/-//g -e "s/\(..\)/\1 /g"`; do
+    for i in $UUID; do
 	num=`printf "%d" 0x$i`
 	octnum=`printf "\%03o" 0x$i`
 	if [ $num -lt 127 -a $num -gt 31 ]; then
@@ -34,31 +34,39 @@ duid_dhclient(){
     duid="$duid\";"
 
     if [ "$(head -1 $lease_file 2>/dev/null)" != "$duid" ]; then
-    echo "$duid" > $lease_file
+        echo "$duid" > $lease_file
+        msg "DUID updated to uuid: $GUID"
+    else
+        msg "DUID is OK"
     fi
+    return 0
 }
 
 duid_dhcpv6(){
  local lease_file="$1"
  local duid_file="$2"
-    ID="00 04 $(dmidecode -s system-uuid|sed -e s/-//g -e "s/\(..\)/\1 /g")" #"
+    ID="00 04 $UUID" 
     N="$(printf %02X $(echo $ID|wc -w))"
     REC="$(echo $N 00 $ID|tr [:lower:] [:upper:])"
-    CUR="$(echo $(od -A n -t x1 "$duid_file"|tr [:lower:] [:upper:]))"
+    CUR="$(echo $(od -A n -t x1 "$duid_file" 2>/dev/null|tr '[:lower:]' '[:upper:]'))"
     if [ "$CUR" = "$REC" ]; then
-        echo "DUID is the same. Leaving lease file."
+        msg "DUID is OK"
         return 0
     fi
     for i in $REC; do
         printf $(printf "\%03o" 0x$i)
     done > "$duid_file"
-    msg "DUID updated to $ID (was $CUR)"
-    rm -f "$lease_file"
+    msg "DUID updated to uuid: $GUID"
+    rm -f "$lease_file" 2>/dev/null
+    return 0
 }
 
+GUID="$(dmidecode -s system-uuid)"
+UUID="$(echo $GUID|sed -e s/-//g -e "s/\(..\)/\1 /g")"
+GUID="$(echo $GUID|tr '[:upper:]' '[:lower:]')"
 while read updater lease_file duid_file; do
     if [ -d "${lease_file%/*}" ]; then
-	msg "Processing $updater: $lease_file"
+	msg "Processing $updater: ${duid_file:-$lease_file}"
 	$updater "$lease_file" "$duid_file"
     fi
 done << EOF
