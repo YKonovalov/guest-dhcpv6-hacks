@@ -1,0 +1,1 @@
+ip -6 -o a s scope global tentative|awk -v ip=$1 '{split($4,a,"/"); if(a[1]==ip)print a[1]}'

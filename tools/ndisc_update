@@ -3,7 +3,7 @@ export PATH=$PATH:/usr/local/sbin:/usr/local/bin
 
 ME=${0##*/}
 
-FDS="$(lsof -a -p $$ -d'^0-2,^255'|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
 for fdd in $FDS; do
 	eval "exec $fdd>&-"
 done
@@ -146,11 +146,18 @@ ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
 	addr_masked=$(ipv6_masked_addr $IP $len 0)
 	addr_net=$(ipv6_expand $net)
 	if [ "$addr_masked" = "$addr_net" ]; then
+		if [ -n "$(ipv6_is_tentative $IP)" ]; then
+			msg "Waiting for DAD to complete for $IP"
+			while [ -n "$(ipv6_is_tentative $IP)" ]; do
+				sleep 1
+			done
+		fi
 		for target in $addr_masked $(ipv6_masked_addr $IP $len 1); do
-			if ping6 -c1 -I $IP $target >/dev/null; then
+			if ipv6_ping_one $IP $target; then
 				msg "Target $target pinged from $IP OK"
 			else
 				msg "ERROR: Could not ping $target from $IP"
+				ip a
 			fi
 		done
 	fi

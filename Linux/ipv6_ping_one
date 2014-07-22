@@ -1,0 +1,1 @@
+ping6 -c1 -I $1 $2 >/dev/null

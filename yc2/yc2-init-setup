@@ -7,7 +7,7 @@ export ASSUME_ALWAYS_YES=YES
 pkg bootstrap -f
 pkg2ng
 
-pkg install curl scapy avahi-autoipd dmidecode isc-dhcp43-client mc bash sudo openresolv ca_root_nss rsync base64
+pkg install curl scapy avahi-autoipd dmidecode isc-dhcp43-client mc bash sudo openresolv ca_root_nss rsync base64 lsof
 #    py27-setuptools27 py27-eventlet py27-pip py27-cheetah py27-virtualenv
 
 ## DHCP
