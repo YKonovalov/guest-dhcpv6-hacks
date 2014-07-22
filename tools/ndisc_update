@@ -3,6 +3,11 @@ export PATH=$PATH:/usr/local/sbin:/usr/local/bin
 
 ME=${0##*/}
 
+FDS="$(lsof -a -p $$ -d'^0-2,^255'|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
 msg(){
 	echo "$1"
 	logger -t "${ME}[$$]" "$1"
