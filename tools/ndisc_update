@@ -157,7 +157,6 @@ ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
 				msg "Target $target pinged from $IP OK"
 			else
 				msg "ERROR: Could not ping $target from $IP"
-				ip a
 			fi
 		done
 	fi
