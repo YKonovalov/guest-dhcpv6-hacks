@@ -142,7 +142,8 @@ done
 msg "Setting $IP preffered"
 msg "$(ipv6_set_preffered $IP)"
 
-ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
+BACKUP_ROUTERS=
+while IFS=/ read net len; do
 	addr_masked=$(ipv6_masked_addr $IP $len 0)
 	addr_net=$(ipv6_expand $net)
 	if [ "$addr_masked" = "$addr_net" ]; then
@@ -152,12 +153,25 @@ ipv6_get_onlink_prefixes $IFACE|while IFS=/ read net len; do
 				sleep 1
 			done
 		fi
-		for target in $addr_masked $(ipv6_masked_addr $IP $len 1); do
+		for target in $addr_masked $(ipv6_masked_addr $IP $len 1) "fe80::1%$IFACE"; do
 			if ipv6_ping_one $IP $target; then
 				msg "Target $target pinged from $IP OK"
+				BACKUP_ROUTERS="$BACKUP_ROUTERS $target"
 			else
 				msg "ERROR: Could not ping $target from $IP"
 			fi
 		done
 	fi
+done <<< $(ipv6_get_onlink_prefixes $IFACE)
+
+for router in $BACKUP_ROUTERS; do
+	if [ "${router%%%*}" = "$router" ]; then
+		prio=0
+	else
+		prio=1
+		router=${router%%%*}
+	fi
+	msg "Adding low-priority $prio default router $router"
+	ipv6_add_backup_defroute $router $IFACE $prio 1450 1390
 done
+

@@ -3,13 +3,13 @@ yc2:=yc2/*
 linux:=$(nd) Linux/* 
 freebsd:=$(nd) FreeBSD/*
 
-all: preceed bsd rpm
+all: linux bsd preceed
 
 preceed: $(linux)
 	cat /dev/null > $@
 	for f in $^; do echo "    echo $$(base64 -w0 $$f)|/target/usr/bin/base64 -d >/target/usr/sbin/$${f##*/}; \\" >> $@; echo "    chmod a+x /target/usr/sbin/$${f##*/}; \\" >> $@; done
 
-rpm: $(linux)
+linux: $(linux)
 	cat /dev/null > $@
 	for f in $^; do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/sbin/$${f##*/}\n\n" >> $@; done
 
@@ -27,6 +27,6 @@ altbsd: $(freebsd)
 	for f in $^; do printf "cat > /usr/local/sbin/$${f##*/} << \\\EOF\n" >> $@; cat $$f >>$@; printf "EOF\nchmod a+x /usr/local/sbin/$${f##*/}\n\n" >> $@; done
 
 clean:
-	rm -f preceed bsd rpm altrpm altbsd
+	rm -f preceed bsd linux altrpm altbsd
 
 .PHONY: all preceed rpm bsd altbsd altrpm clean distclean

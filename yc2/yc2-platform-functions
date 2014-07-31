@@ -1,5 +1,7 @@
 #!/bin/sh -efu
 
+OS=$(uname -s)
+
 OS=$(uname -o)
 case "$OS" in
     "Cygwin")

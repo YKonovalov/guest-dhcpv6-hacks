@@ -1,0 +1,17 @@
+IP=$1
+IFACE=$2
+METRIC=$3
+MTU=$4
+MSS=$5
+if [ -z "$IP" ]; then
+ echo "ERROR: specify IPv6 address" >&2
+ exit 1
+fi
+if [ -z "$IFACE" ]; then
+ echo "ERROR: specify interface name" >&2
+ exit 2
+fi
+METRIC=${METRIC:-0}
+METRIC=$((2048+METRIC))
+ip -6 route replace default via $IP dev $IFACE metric $METRIC mtu ${MTU:-1450} advmss ${MSS:-1390}
+

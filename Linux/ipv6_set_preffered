@@ -11,5 +11,6 @@ else
 		echo "ERROR: interface not found for $IP" >&2
 		exit 2
 	fi
-	echo "setting $1 preffered not yet supported"
+	echo "setting $1 preffered"
+	ip -6 addr change $IP dev $IFACE
 fi
