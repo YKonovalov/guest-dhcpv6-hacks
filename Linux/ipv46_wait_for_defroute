@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
+VER="${1:-46}"
+VER="$(echo $VER|sed 's/\(.\)/\1\n/g'|grep '^\(4\|6\)$'|sort -u|tr '\n' ' ')"
+
+PIDD="$(mktemp -d)"
+PIDFILE4="${PIDD}/4"
+PIDFILE6="${PIDD}/6"
+touch $PIDFILE4 $PIDFILE6
+CLEAN4=
+CLEAN6=
+cleanup() {
+ if [ -z "$CLEAN4" ]; then
+	kill `cat "$PIDFILE4"` 2>/dev/null
+	rm -f "$PIDFILE4"
+	CLEAN4=yes
+ fi
+ if [ -z "$CLEAN6" ]; then
+	kill `cat "$PIDFILE6"` 2>/dev/null
+	rm -f "$PIDFILE6"
+	CLEAN6=yes
+ fi
+ if [ -n "$CLEAN4" ] && [ -n "$CLEAN6" ]; then
+	rmdir $PIDD
+ fi
+}
+trap cleanup 0 1 2 15
+
+is_def(){
+	for ver in $1; do
+		ip -$ver route list default
+		VER="$(echo $VER|tr -d '$ver')"
+	done
+}
+
+if [ -n "$(is_def "$VER")" ]; then
+	echo OK
+	exit 0
+fi
+echo "Waiting for default route for IP version $(echo $VER|sed 's/ / or /')"
+(for ipv in $VER; do ip -$ipv monitor route & echo $! > "$PIDD/$ipv"; done)|
+	sed -n "s;^default via\s\+\([[:alnum:]:.]\+\).*$;\1;;ta;b;:a p;ekill \$(cat $PIDFILE4 $PIDFILE6)" 
+echo OK
+
