@@ -17,6 +17,7 @@ rcvar=dhclient6_enable
 start_cmd=dhclient6_start
 stop_cmd=dhclient6_stop
 start_postcmd=dhclient6_poststart
+start_precmd=dhclient6_prestart
 
 dhclient6_bin=/usr/local/sbin/dhclient
 
@@ -26,7 +27,7 @@ dhclient6_prestart()
 	PATH=$PATH:/usr/local/sbin:/usr/local/bin
 	export PATH
 	checkyesno dhclient6_enable && echo "Updating DHCPv6 DUID." && \
-	/usr/local/sbin/duid-uuid-update
+	/usr/local/sbin/duid-uuid-update </dev/null >/dev/console 2>&1
 }
 
 dhclient6_poststart()
