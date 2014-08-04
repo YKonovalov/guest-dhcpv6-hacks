@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+#
+# PROVIDE: defroute
+# REQUIRE: netif dhclient6
+# BEFORE: NETWORKING
+# KEYWORD: nojail shutdown
+#
+# Default Route detector.
+#
+
+defroute_flags=${defroute_flags-"46"}
+
+. /etc/rc.subr
+
+defroute_enable=${defroute_enable-YES}
+
+name=defroute
+rcvar=defroute_enable
+
+start_cmd=defroute_start
+stop_cmd=true
+
+defroute_bin=/usr/local/sbin/ipv46_wait_for_defroute
+
+defroute_start() {
+    /etc/rc.d/ldconfig start
+    checkyesno defroute_enable && echo "Checking Default Routes." && \
+    	PATH=$PATH:/usr/local/bin ${defroute_bin} ${defroute_flags}
+}
+
+load_rc_config ${name}
+run_rc_command "$1"

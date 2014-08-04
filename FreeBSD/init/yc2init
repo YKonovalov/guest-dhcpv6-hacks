@@ -1,0 +1,26 @@
+#!/bin/sh
+#
+# PROVIDE: yc2init
+# REQUIRE: avahi-autoipd
+# BEFORE: SERVERS
+# KEYWORD: nojail shutdown
+
+. /etc/rc.subr
+
+yc2init_enable=${yc2init_enable-YES}
+
+name=yc2init
+rcvar=yc2init_enable
+
+start_cmd=yc2init_start
+stop_cmd=true
+
+yc2init_bin=/yc2/firstboot.sh
+
+yc2init_start() {
+    checkyesno yc2init_enable && echo "Starting yc2init." && \
+    	PATH=$PATH:/usr/local/sbin:/usr/local/bin ${yc2init_bin}
+}
+
+load_rc_config ${name}
+run_rc_command "$1"

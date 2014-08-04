@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# PROVIDE: dhclient6
+# REQUIRE: netif
+# BEFORE: NETWORKING
+# KEYWORD: nojail shutdown
+
+dhclient6_flags=${dhclient6_flags-"-6 -nw em0"}
+
+. /etc/rc.subr
+
+dhclient6_enable=${dhclient6_enable-YES}
+
+name=dhclient6
+rcvar=dhclient6_enable
+
+start_cmd=dhclient6_start
+stop_cmd=dhclient6_stop
+start_postcmd=dhclient6_poststart
+
+dhclient6_bin=/usr/local/sbin/dhclient
+
+dhclient6_prestart()
+{
+	/etc/rc.d/ldconfig start
+	PATH=$PATH:/usr/local/sbin:/usr/local/bin
+	export PATH
+	checkyesno dhclient6_enable && echo "Updating DHCPv6 DUID." && \
+	/usr/local/sbin/duid-uuid-update
+}
+
+dhclient6_poststart()
+{
+	PATH=$PATH:/usr/local/sbin:/usr/local/bin
+	export PATH
+	(/usr/local/sbin/ndisc_update </dev/null >/dev/console 2>&1 &) &
+}
+
+dhclient6_start() {
+    checkyesno dhclient6_enable && echo "Starting dhclient6." && \
+    	${dhclient6_bin} ${dhclient6_flags}
+}
+
+dhclient6_stop() {
+    checkyesno dhclient6_enable && echo "Stopping dhclient6." && \
+    	${dhclient6_bin} -r ${dhclient6_flags}
+}
+
+load_rc_config ${name}
+run_rc_command "$1"
