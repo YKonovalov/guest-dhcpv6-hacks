@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# PROVIDE: avahi-autoipd
+# REQUIRE: netif
+# BEFORE: NETWORKING
+# KEYWORD: nojail shutdown
+#
+# Avahi's mDNSResponder, a Zeroconf (Bonjour) service advertisement daemon.
+#
+
+avahi_autoipd_flags=${avahi_autoipd_flags-"-D em0:avahi"}
+
+. /etc/rc.subr
+. /usr/local/etc/gnome.subr
+
+avahi_autoipd_enable=${avahi_autoipd_enable-${gnome_enable}}
+
+name=avahi-autoipd
+rcvar=avahi_autoipd_enable
+
+start_cmd=avahi_autoipd_start
+stop_cmd=avahi_autoipd_stop
+
+avahi_autoipd_bin=/usr/local/sbin/avahi-autoipd
+
+avahi_autoipd_start() {
+    checkyesno avahi_autoipd_enable && echo "Starting avahi-autoipd." && \
+    	${avahi_autoipd_bin} ${avahi_autoipd_flags}
+}
+
+avahi_autoipd_stop() {
+    checkyesno avahi_autoipd_enable && echo "Stopping avahi-autoipd." && \
+    	${avahi_autoipd_bin} -k ${avahi_autoipd_flags}
+}
+
+load_rc_config ${name}
+run_rc_command "$1"

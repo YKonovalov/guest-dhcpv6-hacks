@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+###
+## Customization done to base QCOW image:
+#
+export ASSUME_ALWAYS_YES=YES
+pkg bootstrap -f
+pkg2ng
+
+pkg install curl scapy avahi-autoipd dmidecode isc-dhcp43-client mc bash sudo openresolv ca_root_nss rsync base64 lsof
+
+## Resolvconf
+if [ ! -L /etc/resolv.conf ]; then
+    cat /etc/resolv.conf > /usr/local/etc/resolvconf/run/resolv.conf && \
+    ln -f -s /usr/local/etc/resolvconf/run/resolv.conf /etc/resolv.conf
+fi
+
+[ -d /var/lib ] || mkdir /var/lib
+
+cat > /usr/local/etc/dhclient.conf << \EOF
+timeout 45;request subnet-mask, broadcast-address, time-offset, routers, domain-name, domain-search, domain-name-servers, ntp-servers , interface-mtu;
+script "/usr/local/sbin/dhclient-script-resolvconf";
+EOF
+cat /usr/local/etc/dhclient.conf > /etc/dhclient.conf
+
+echo 'console="comconsole,vidconsole"' > /boot/loader.conf
+echo 'autoboot_delay="2"' >> /boot/loader.conf
+
+chsh -s /usr/local/bin/bash root
+chpass -p '' root
+
+cat > /etc/sysctl.conf << \EOF
+net.inet6.ip6.accept_rtadv=1
+EOF
+
+cat > /etc/rc.conf << \EOF
+hostname="newborn"
+ifconfig_em0="DHCP"
+sshd_enable="YES"
+ntpdate_enable="YES"
+ntpd_enable="YES"
+# Set dumpdev to "AUTO" to enable crash dumps, "NO" to disable
+dumpdev="NO"
+ifconfig_vtnet0_name="em0"
+ifconfig_em0_ipv6="inet6 accept_rtadv"
+rtsold_enable="YES"
+background_dhclient="NO"
+defaultroute_delay="0"
+dhclient_program="/usr/local/sbin/dhclient"
+dhclient_flags="-4 -nw"
+avahi_autoipd_enable="YES"
+avahi_autoipd_flags="-D em0"
+EOF
+
+cat >> /etc/profile << \EOF
+MAN_PATH=$MAN_PATH:/usr/local/share/man
+export MAN_PATH
+EOF
+

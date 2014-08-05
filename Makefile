@@ -1,7 +1,8 @@
 nd:=tools/*
-yc2:=yc2/*
-linux:=$(nd) Linux/* 
-freebsd:=$(nd) FreeBSD/*
+yc2:=yc2/* FreeBSD/yc2/*
+linux:=$(nd) Linux/sbin/* 
+freebsd:=$(nd) FreeBSD/sbin/*
+bsdinit:=$(nd) FreeBSD/init/*
 
 all: linux bsd preceed
 
@@ -14,8 +15,9 @@ linux: $(linux)
 	for f in $^; do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/sbin/$${f##*/}\n\n" >> $@; done
 
 bsd: $(freebsd)
-	cat yc2/yc2-init-setup > $@
+	cat FreeBSD/yc2/yc2-init-setup > $@
 	for f in $^; do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/local/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/local/sbin/$${f##*/}\n\n" >> $@; done
+	for f in $(bsdinit); do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/local/etc/rc.d/$${f##*/}" >> $@; done
 	for f in $(yc2); do echo "base64 --decode <<< $$(base64 -w0 $$f) >/yc2/$${f##*/}" >> $@; printf "chmod a+x /yc2/$${f##*/}\n\n" >> $@; done
 
 altrpm: $(linux)
