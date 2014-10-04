@@ -1,0 +1,9 @@
+#!/bin/sh
+while true; do
+	O="$(ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="ether" {E=$2;next}; {if($1=="inet6" && NF==4 && $4<128)print $2,i[1],E}')"
+	if [ -n "$O" ]; then
+		echo "$O"
+		break
+	fi
+	sleep 1
+done

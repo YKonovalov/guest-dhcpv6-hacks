@@ -68,7 +68,7 @@ while true; do
 	case "${IP:=$1}" in
 		monitor)
 			msg "Waiting for permanent IPv6 address..."
-			O="$(ipv6_wait_for_global_permanent)"
+			O="$(ipv6_wait_for_global_permanent|sort|head -1)"
 			if [ -z "$O" ]; then
 				msg "ERROR: Monitor exit with no result"
 				exit 1
@@ -77,7 +77,7 @@ while true; do
 			fi
 			;;
 		"")
-			O="$(ipv6_get_global_permanent)"
+			O="$(ipv6_get_global_permanent|sort|head -1)"
 			if [ -z "$O" ]; then
 				msg "No permanent IPv6 addresses found"
 				set "monitor"

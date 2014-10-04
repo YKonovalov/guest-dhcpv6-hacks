@@ -1,0 +1,11 @@
+#!/usr/local/bin/bash
+#
+
+daemon="/yc2/firstboot.sh"
+
+. /etc/rc.d/rc.subr
+
+PATH=$PATH:/usr/local/sbin:/usr/local/bin
+export PATH
+
+rc_cmd $1

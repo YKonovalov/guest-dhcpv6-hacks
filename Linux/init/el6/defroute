@@ -1,0 +1,14 @@
+#!/bin/bash
+# chkconfig: 2345 9 90
+### BEGIN INIT INFO
+# Provides: defroute
+# Required-Start: $network sshd
+# Defalt-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Description: IPv4/IPv6 default route signaling
+### END INIT INFO#
+. /etc/init.d/functions
+if [ "$1" != "start" ]; then
+   exit 0
+fi
+ipv46_wait_for_defroute

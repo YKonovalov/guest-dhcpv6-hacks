@@ -8,12 +8,14 @@ for fdd in $FDS; do
 	eval "exec $fdd>&-"
 done
 
-VER="${1:-46}"
-VER="$(echo $VER|sed 's/\(.\)/\1\n/g'|grep '^\(4\|6\)$'|sort -u|tr '\n' ' ')"
+
+ONEXIT="$1"
 
 msg(){
-    echo "${ME}[$$]:" "$1" >&2
-    logger -t "${ME}[$$]" "$1"
+    local P
+    P="${ME}[$$]${i:+(try #$i)}"
+    echo "$P:" "$1" >&2
+    logger -t "$P" "$1"
 }
 
 find_direct() {
@@ -45,15 +47,30 @@ find_direct() {
 		return 4
 	fi
 }
-while true; do
-	if H=`hostname -f 2>/dev/null`; then
+
+get_hostname() {
+	local cmd=H=
+	while IFS='	' read cmd filter; do
+		H=`eval $cmd 2>/dev/null`
+		if [ $? -eq 0 -a  -n "$H" ]; then
+			eval "echo "$H"${filter:+|$filter}"
+			break
+		fi
+	done << \HOSTPROBE
+hostname -f
+hostname -A		tr " " "\\n"|grep "^$(hostname)"|head -1
+host $(hostname)	cut -d" " -f1|head -1
+HOSTPROBE
+}
+for i in `seq 12`; do
+	if H=`get_hostname`; [ -n "$H" ]; then
 		msg "Hostname is $H"
 	else
 		msg "Waiting for hostname to resolve"
 		sleep 3
 		continue
 	fi
-	if I=`hostname -I 2>/dev/null`; then
+	if I=`hostname -I 2>/dev/null` || I=`echo $(ip a s scope global|awk '{if($1~"(inet|inet6)")print $2}'|cut -d'/' -f1)`; then
 		msg "IP assigned $I"
 		I="$(echo $I|tr ' ' '\n'|sort -u)"
 	else
@@ -108,11 +125,11 @@ while true; do
 				if [ $PC -gt 1 ]; then
 					msg "WARNING: Multiple ($PC) PTR records exists for single IP ($R): $(echo $P)"
 				fi
-				if ! (echo "$P"|grep "^${H}\.$" >/dev/null); then
-					msg "WARNING: PTR for $R does not address hostname: $(echo $P)"
+				if ! (echo "$P"|grep "^${H}\.*$" >/dev/null); then
+					msg "WARNING: PTR for $R  $(echo $P) does not address hostname $H"
 				fi
 				for N in $P; do
-					NAMES="$(echo "$NAMES"|awk -v N=$N -v V=$R '{if($1==N){print $1" "$2","V; E=1}else{print}}END{if(E!=1)print N" "V}')"
+					NAMES="$(echo "$NAMES"|awk -v N=${N%.} -v V=$R '{if($1==N){print $1" "$2","V; E=1}else{print}}END{if(E!=1)print N" "V}')"
 				done
 				msg "PTR for $R is $P"
 				PTR="$(printf "$PTR\n$R $P\n")"
@@ -142,4 +159,8 @@ while true; do
 	fi
 	sleep 2
 done
+if [ -n "$ONEXIT" ] && E=$(which "$ONEXIT"); then
+	msg "Executing $E"
+	exec "$E"
+fi
 

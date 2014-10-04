@@ -1,0 +1,2 @@
+IFACE=${1:-$(ipv6_get_default_iface)}
+netstat -nr|awk -v iface=$IFACE '$1~"/" && $1~":" && $2~"^link" && $8==iface && $1 !~ /%/ {print $1}'

@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+
+daemon="/usr/local/sbin/ipv46_wait_for_defroute"
+
+. /etc/rc.d/rc.subr
+
+PATH=$PATH:/usr/local/sbin:/usr/local/bin
+export PATH
+
+rc_cmd $1

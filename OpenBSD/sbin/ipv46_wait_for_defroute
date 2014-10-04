@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
+VER="${1:-46}"
+VER="$(echo $VER|sed 's/\(.\)/\1\n/g'|tr 'n' '\n'|grep '^[46]$'|sort -u|tr '\n' ' ')"
+
+PIDFILE="$(mktemp)"
+CLEAN=
+cleanup() {
+ if [ -z "$CLEAN" ]; then
+	kill `cat "$PIDFILE"` 2>/dev/null
+	rm -f "$PIDFILE"
+	CLEAN=yes
+ fi
+}
+trap cleanup 0 1 2 15
+
+is_def(){
+	for ver in $1; do
+		[ $ver -eq 4 ] && ver=
+		route get -inet$ver default 2>/dev/null|awk '{if($1=="gateway:")print $2}'
+		if [ $? -eq 0 ]; then
+			VER="$(echo $VER|tr -d '$ver')"
+		fi
+	done
+}
+if [ -n "$(is_def "$VER")" ]; then
+	echo OK
+	exit 0
+fi
+echo "Waiting for default route for IP version $(echo $VER|sed 's/ / or /')"
+DR_MATCH=
+for v in $VER; do
+	[ $v -eq 4 ] && DR_MATCH="$(printf '%s\n%s' $DR_MATCH 'default')"
+	[ $v -eq 6 ] && DR_MATCH="$(printf '%s\n%s' $DR_MATCH '::')"
+done
+DR_MATCH="$(echo $DR_MATCH|tr ' ' '|')"
+
+(route monitor & echo $! > "$PIDFILE")|
+	awk -v pf="$PIDFILE" -v dr='^('"$DR_MATCH"')$' '/^[[:upper:]_]+:/ {O=$1;next}; {if(O=="RTM_ADD:" && $1~dr){print $2; system("kill $(cat "pf")"); exit}}'
+echo OK
+

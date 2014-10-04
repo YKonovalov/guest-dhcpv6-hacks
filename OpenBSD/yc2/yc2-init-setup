@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+###
+## Customization done to base QCOW image:
+#
+
+pkg_add -I curl wget scapy avahi dmidecode isc-dhcp43-client mc bash sudo openresolv ca_root_nss rsync base64 lsof
+
+[ -f /etc/netstart--orig ] || cp /etc/netstart /etc/netstart--orig
+sed -e '/"dhcp")/i \
+                "dhcp6")\
+                        cmd="PATH=$PATH:/usr/local/sbin:/usr/local/bin; /usr/local/sbin/duid-uuid-update $if;/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if"\
+                        ;;\
+' -e 's:dhclient $if:/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if:' /etc/netstart--orig >/etc/netstart
+grep dhcp6 /etc/hostname.vio0 >/dev/null || echo "dhcp6" >> /etc/hostname.vio0
+
+[ -f /etc/dhclient.conf--orig ] || cp /etc/dhclient.conf /etc/dhclient.conf--orig
+cat > /etc/dhclient.conf << \EOF
+timeout 45;request subnet-mask, broadcast-address, time-offset, routers, domain-name, domain-search, domain-name-servers, ntp-servers , interface-mtu;
+script "/usr/local/sbin/dhclient-script-resolvconf";
+EOF
+
+[ -f /etc/dhclient-exit-hooks ] || (printf '[ "$reason" = "BOUND6" ] && (PATH=$PATH:/usr/local/sbin:/usr/local/bin /usr/local/sbin/ndisc_update $new_ip6_address $interface </dev/null >/dev/console 2>&1 &) &\n' > /etc/dhclient-exit-hooks && chmod a+x /etc/dhclient-exit-hooks)
+
+(cd; wget http://roy.marples.name/downloads/openresolv/openresolv-3.5.7.tar.bz2 && tar jxvf openresolv-3.5.7.tar.bz2 && cd openresolv-3.5.7 && ./configure && make install)
+
+[ -f /etc/boot.conf ] || echo "set tty com0" > /etc/boot.conf
+
+chsh -s /usr/local/bin/bash root
+#chpass -p '' root
+
+cat >> /etc/profile << \EOF
+MAN_PATH=$MAN_PATH:/usr/local/share/man
+export MAN_PATH
+EOF
+
+[ -d /yc2 ] || mkdir /yc2

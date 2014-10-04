@@ -1,0 +1,3 @@
+#!/bin/sh
+[ -z "$1" ] && exit
+ifconfig $1|awk '{if($1=="inet6" && $5=="scopeid") print $2}'

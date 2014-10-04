@@ -1,0 +1,63 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          ipv4ll
+# Required-Start:    $network $local_fs
+# Short-Description: Initialises IPv4 Link Local address
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+NAME=ipv4ll
+IPV4LL=avahi-autoipd
+START_OPTS='--debug --force-bind eth0:avahi'
+STOP_OPTS='--kill eth0:avahi'
+CHECK_OPTS='--check eth0:avahi'
+PIDFILE=/var/run/ipv4ll.pid
+LOGFILE=/var/log/ipv4ll.log
+
+. /lib/lsb/init-functions
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting IPv4LL"
+	ip a
+	ps axf
+        ($IPV4LL $START_OPTS > "$LOGFILE" 2>&1 & echo $! > "$PIDFILE") & 
+	for i in `seq 30`; do
+		sleep 1
+		if lsof -p $(cat "$PIDFILE") -a "$LOGFILE" >/dev/null; then
+			if grep '^Successfully claimed IP address' "$LOGFILE"; then
+				log_daemon_msg "IPv4LL accured in $i seconds"
+				log_end_msg 0
+				exit 0
+			fi
+		else
+			log_daemon_msg "IPv4LL exited"
+			log_end_msg 1
+			exit 0
+		fi
+	done
+	log_daemon_msg "IPv4LL does not accure IP within $i seconds. Continue anyway."
+	log_end_msg 1
+	ip a
+	pd axf
+        ;;
+    stop)
+        log_daemon_msg "Stopping IPv4LL"
+        if $IPV4LL $STOP_OPTS 2> /dev/null
+        then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+    restart|force-reload)
+        exec $0 start
+        ;;
+    *)
+        N=/etc/init.d/$NAME
+        echo "Usage: $N {start|stop|restart|force-reload|status}" >&2
+        exit 1
+        ;;
+esac
+
+exit 0
