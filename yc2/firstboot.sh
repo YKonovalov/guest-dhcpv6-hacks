@@ -14,7 +14,7 @@ IAMTHEHOST=$(hostname)
 DEF_FQDN="newborn"
 
 DEF_DOMAIN=""
-DHCPv6="$(grep 'option fqdn.domainname' /var/db/dhclient6.leases|awk -F\" '{print $2; exit}')"
+DHCPv6="$(grep 'option fqdn.domainname' /var/db/dhclient6.leases /var/db/dhclient6.vio0.leases|awk -F\" '{print $2; exit}')"
 DHCPv6=${DHCPv6#.}
 if [ -n "$DHCPv6" ]; then
 	DEF_DOMAIN=$DHCPv6

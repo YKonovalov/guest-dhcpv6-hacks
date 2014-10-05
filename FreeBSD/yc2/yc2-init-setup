@@ -29,6 +29,8 @@ echo 'autoboot_delay="2"' >> /boot/loader.conf
 chsh -s /usr/local/bin/bash root
 chpass -p '' root
 
+sed -i "s/^#PasswordAuthentication yes.*/PasswordAuthentication no/" /etc/ssh/sshd_config
+
 cat > /etc/sysctl.conf << \EOF
 net.inet6.ip6.accept_rtadv=1
 EOF

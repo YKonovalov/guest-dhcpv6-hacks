@@ -31,11 +31,12 @@ is_def(){
 		fi
 	done
 }
-if [ -n "$(is_def "$VER")" ]; then
-	echo OK
+DR="$(is_def "$VER")"
+if [ -n "$DR" ]; then
+	echo "$DR"
 	exit 0
 fi
-echo "Waiting for default route for IP version $(echo $VER|sed 's/ / or /')"
+echo "Waiting for default route for IP version $(echo $VER|sed 's/ / or /')" >&2
 DR_MATCH=
 for v in $VER; do
 	[ $v -eq 4 ] && DR_MATCH="$(printf '%s\n%s' $DR_MATCH 'default')"
@@ -45,5 +46,4 @@ DR_MATCH="$(echo $DR_MATCH|tr ' ' '|')"
 
 (route monitor & echo $! > "$PIDFILE")|
 	awk -v pf="$PIDFILE" -v dr='^('"$DR_MATCH"')$' '/^[[:upper:]_]+:/ {O=$1;next}; {if(O=="RTM_ADD:" && $1~dr){print $2; system("kill $(cat "pf")"); exit}}'
-echo OK
 

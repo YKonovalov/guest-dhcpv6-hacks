@@ -19,6 +19,7 @@ duid_dhclient	/var/lib/dhcp/dhclient6.leases
 duid_dhclient	/var/db/dhclient6.IFACE.leases
 duid_dhclient	/var/db/dhclient6.leases
 duid_dhcpv6	/var/lib/dhcpv6/client6.leases /var/lib/dhcpv6/dhcp6c_duid
+duid_dhcpcd	/var/db/dhcpcd-vio0.lease6 /etc/dhcpcd.duid
 "
 
 duid_dhclient(){
@@ -61,6 +62,23 @@ duid_dhcpv6(){
     rm -f "$lease_file" 2>/dev/null
     return 0
 }
+
+duid_dhcpcd(){
+ local lease_file="$1"
+ local duid_file="$2"
+    ID="00 04 $UUID" 
+    REC="$(echo $ID|tr [:upper:] [:lower:]|tr ' ' ':')"
+    CUR="$(cat "$duid_file")"
+    if [ "$CUR" = "$REC" ]; then
+        msg "DUID is OK"
+        return 0
+    fi
+    echo "$REC" > "$duid_file"
+    msg "DUID updated to uuid: $GUID"
+    rm -f "$lease_file" 2>/dev/null
+    return 0
+}
+
 
 GUID="$(dmidecode -s system-uuid)"
 UUID="$(echo $GUID|sed -e s/-//g -e "s/\(..\)/\1 /g")"

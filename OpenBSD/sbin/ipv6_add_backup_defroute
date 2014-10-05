@@ -12,7 +12,7 @@ if [ -z "$IFACE" ]; then
  exit 2
 fi
 METRIC=${METRIC:-0}
-METRIC=$((2048+METRIC))
+METRIC=$((60+METRIC))
 echo $IP|grep '^fe80:' >/dev/null && IP=$IP%$IFACE 
-route add -net -inet6 :: $IP -mtu ${MTU:-1450} 
+route add -net -inet6 :: $IP -mtu ${MTU:-1450} -priority $METRIC 
 

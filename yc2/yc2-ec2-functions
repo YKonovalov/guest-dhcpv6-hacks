@@ -20,8 +20,8 @@ case "$OS" in
     "Cygwin")
 	echo Administrator
 	;;
-    "GNU/Linux"|"FreeBSD")
-	echo cloud-user
+    "GNU/Linux"|"FreeBSD"|"OpenBSD")
+	echo root
 	;;
     *)
 	dolog "Unknown OS. assume unix"
@@ -40,9 +40,31 @@ case "$OS" in
 	pw useradd -n $user -g wheel -s /usr/local/bin/bash -m -c "Default cloud user"
 	echo -e $user'\tALL=(ALL)\tNOPASSWD: ALL' >> /usr/local/etc/sudoers
 	;;
+    "OpenBSD")
+	useradd -m -g wheel -s /usr/local/bin/bash -m -c "Default cloud user" $user
+	;;
     *)
 	dolog "Unknown OS. assume unix"
 	useradd $user
+esac
+}
+
+set_hostname()
+{
+local hn=$1
+case "$OS" in
+    "GNU/Linux")
+	[ -f /etc/hostname ] && echo "$hn" >/etc/hostname
+	[ -e /etc/sysconfig/network ] && sed -i -e "s/^HOSTNAME=.*/HOSTNAME=$final_hostname/" /etc/sysconfig/network
+	;;
+    "FreeBSD")
+	[ -e /etc/rc.conf ] && sed -i -e "s/^hostname=.*/hostname=\"$final_hostname\"/" /etc/rc.conf
+	;;
+    "OpenBSD")
+	[ -f /etc/myname ] && echo "$hn" >/etc/myname
+	;;
+    *)
+	dolog "Unknown OS. unable to write hostname"
 esac
 }
 
@@ -51,7 +73,7 @@ instance_get_key()
 {
     local keys="$(ec2curl "$metadata_service_url/latest/meta-data/public-keys")"
     if [ $? -eq 0 ]; then
-        local firstkey="$(echo "$keys"|head -1|grep '^[[:digit:]]\+=[[:alnum:]]\+')"
+        local firstkey="$(echo "$keys"|head -1)"
         local firstkey_id=${firstkey%%=*}
         local firstkey_name=${firstkey##*=}
         if [ "$(echo "$firstkey_id"|grep "^[[:digit:]]$")" != "" ]; then
@@ -70,11 +92,12 @@ instance_get_key()
             	else
             	    dolog "home directory for user $user does not exists $home. Not installing ssh-rsa key \"$firstkey_name\" to local user \"$LOGNAME\" authorized_keys file"
             	fi
-
-            	lock_key="no-port-forwarding,no-agent-forwarding,no-X11-forwarding,command=\"echo 'Please login as the user \\\"$user\\\" rather than the user \\\"root\\\".';echo;sleep 10\""
-            	dolog "installing locked ssh-rsa key \"$firstkey_name\" to user \"root\" authorized_keys file"
-            	[ -d /root/.ssh ] || mkdir -p /root/.ssh && chmod 700 /root/.ssh && chown root /root/.ssh || dolog "failed to create .ssh directory for user root"
-            	(cat /root/.ssh/authorized_keys; echo "$lock_key $firstkey")|uniq > /root/.ssh/authorized_keys && chmod 644 /root/.ssh/authorized_keys && chown root /root/.ssh/authorized_keys || dolog "failed to create authorized_keys for user root"
+		if [ "$user" != "root" ]; then
+            	    lock_key="no-port-forwarding,no-agent-forwarding,no-X11-forwarding,command=\"echo 'Please login as the user \\\"$user\\\" rather than the user \\\"root\\\".';echo;sleep 10\""
+            	    dolog "installing locked ssh-rsa key \"$firstkey_name\" to user \"root\" authorized_keys file"
+            	    [ -d /root/.ssh ] || mkdir -p /root/.ssh && chmod 700 /root/.ssh && chown root /root/.ssh || dolog "failed to create .ssh directory for user root"
+            	    (cat /root/.ssh/authorized_keys; echo "$lock_key $firstkey")|uniq > /root/.ssh/authorized_keys && chmod 644 /root/.ssh/authorized_keys && chown root /root/.ssh/authorized_keys || dolog "failed to create authorized_keys for user root"
+            	fi
             else
                 dolog "key with id $firstkey_id and name \"$firstkey_name\" is not valid ssh key"
             fi
@@ -382,8 +405,7 @@ else
 fi
 
 # update hostname
-[ -e /etc/sysconfig/network ] && sed -i -e "s/^HOSTNAME=.*/HOSTNAME=$final_hostname/" /etc/sysconfig/network
-[ -e /etc/rc.conf ] && sed -i -e "s/^hostname=.*/hostname=\"$final_hostname\"/" /etc/rc.conf
+set_hostname $final_hostname
 hostname $final_hostname
 
 # bind hostname to local ip

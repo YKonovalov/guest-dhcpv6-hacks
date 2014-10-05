@@ -4,34 +4,63 @@
 ## Customization done to base QCOW image:
 #
 
-pkg_add -I curl wget scapy avahi dmidecode isc-dhcp43-client mc bash sudo openresolv ca_root_nss rsync base64 lsof
+pkg_add -I curl wget scapy avahi dmidecode isc-dhcp-client mc bash rsync base64 lsof coreutils
+[ -L /usr/local/bin/seq ] || ln -s /usr/local/bin/gseq /usr/local/bin/seq
 
-[ -f /etc/netstart--orig ] || cp /etc/netstart /etc/netstart--orig
-sed -e '/"dhcp")/i \
-                "dhcp6")\
-                        cmd="PATH=$PATH:/usr/local/sbin:/usr/local/bin; /usr/local/sbin/duid-uuid-update $if;/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if"\
-                        ;;\
-' -e 's:dhclient $if:/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if:' /etc/netstart--orig >/etc/netstart
-grep dhcp6 /etc/hostname.vio0 >/dev/null || echo "dhcp6" >> /etc/hostname.vio0
+grep yc2init /etc/rc.conf.local >/dev/null || echo 'pkg_scripts="defroute yc2init"' >> /etc/rc.conf.local
+
+cat > /etc/hostname.vio0 << \EOF
+rtsol -autoconfprivacy
+up
+!(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
+!/sbin/dhcpcd -4 $if
+#/sbin/dhcpcd -6 $if
+#/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
+!/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
+!(((PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 6; sleep 3) |xargs ping6 -c1 >/dev/console) &)&
+EOF
+
+sed -e "s:cat \(.*std\)\(6*\) > /etc/resolv.conf$:resolvconf -a \${interface}-dhcp\2 < \1\2:" \
+    -e "1,/EXPIRE6/ s:cat \(.*save\) > /etc/resolv.conf$:resolvconf -d \${interface}-dhcp:" \
+    -e "/EXPIRE6/,$ s:cat \(.*save\) > /etc/resolv.conf$:resolvconf -d \${interface}-dhcp6:" \
+    /usr/local/sbin/dhclient-script > /usr/local/sbin/dhclient-script-resolvconf
+chmod a+x /usr/local/sbin/dhclient-script-resolvconf
 
 [ -f /etc/dhclient.conf--orig ] || cp /etc/dhclient.conf /etc/dhclient.conf--orig
 cat > /etc/dhclient.conf << \EOF
-timeout 45;request subnet-mask, broadcast-address, time-offset, routers, domain-name, domain-search, domain-name-servers, ntp-servers , interface-mtu;
+option rfc3442-classless-static-routes code 121 = {array of unsigned integer 8};
+timeout 45;request subnet-mask, broadcast-address, time-offset, routers, domain-name, domain-search, domain-name-servers, ntp-servers , interface-mtu, rfc3442-classless-static-routes;
 script "/usr/local/sbin/dhclient-script-resolvconf";
 EOF
 
-[ -f /etc/dhclient-exit-hooks ] || (printf '[ "$reason" = "BOUND6" ] && (PATH=$PATH:/usr/local/sbin:/usr/local/bin /usr/local/sbin/ndisc_update $new_ip6_address $interface </dev/null >/dev/console 2>&1 &) &\n' > /etc/dhclient-exit-hooks && chmod a+x /etc/dhclient-exit-hooks)
+[ -f /etc/dhclient-exit-hooks ] || (printf '[ "$reason" = "BOUND6" ] && (PATH=$PATH:/usr/local/sbin:/usr/local/bin /usr/local/sbin/ndisc_update $new_ip6_address $interface </dev/null >/dev/console 2>&1 &) &\n. /usr/local/sbin/dhclient-exit-hooks-rfc3442-classless-routes\n' > /etc/dhclient-exit-hooks && chmod a+x /etc/dhclient-exit-hooks)
 
-(cd; wget http://roy.marples.name/downloads/openresolv/openresolv-3.5.7.tar.bz2 && tar jxvf openresolv-3.5.7.tar.bz2 && cd openresolv-3.5.7 && ./configure && make install)
-
+(cd; wget http://roy.marples.name/downloads/openresolv/openresolv-3.5.7.tar.bz2 && tar jxvf openresolv-3.5.7.tar.bz2 && cd openresolv-3.5.7 && ./configure && make install && cd ../ && rm -rf openresolv-3.5.7 && rm -f openresolv-3.5.7.tar.bz2)
+(cd; wget http://roy.marples.name/downloads/dhcpcd/dhcpcd-6.4.7.tar.bz2 &&
+    tar jxvf dhcpcd-6.4.7.tar.bz2 && cd dhcpcd-6.4.7 && ./configure && make && make install && cd ../ &&
+    rm -rf dhcpcd-6.4.7 && rm -f dhcpcd-6.4.7.tar.bz2)
+ 
 [ -f /etc/boot.conf ] || echo "set tty com0" > /etc/boot.conf
 
 chsh -s /usr/local/bin/bash root
 #chpass -p '' root
+
+[ -f /etc/ssh/sshd_config--orig ] || cp /etc/ssh/sshd_config /etc/ssh/sshd_config--orig
+sed "s/^#PasswordAuthentication yes.*/PasswordAuthentication no/" /etc/ssh/sshd_config--orig >/etc/ssh/sshd_config
 
 cat >> /etc/profile << \EOF
 MAN_PATH=$MAN_PATH:/usr/local/share/man
 export MAN_PATH
 EOF
 
+if ! grep firstboot.sh /etc/rc.local >/dev/null; then
+    echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin /yc2/firstboot.sh)' >>/etc/rc.local
+    echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute)' >>/etc/rc.local
+    echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_hostname_prt)' >>/etc/rc.local
+fi
+
 [ -d /yc2 ] || mkdir /yc2
+
+dd bs=1M if=/dev/zero of=/var/tmp/zeros || :
+rm -f /var/tmp/zeros
+echo "(Don't worry -- that out-of-space error was expected.)"
