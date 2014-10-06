@@ -1,0 +1,52 @@
+#!/bin/sh
+#
+###
+## Customization done to base QCOW image:
+#
+
+pkg_add -I libdaemon totd
+
+grep totd /etc/rc.conf.local >/dev/null || cat >>  /etc/rc.conf.local << \EOF
+pkg_scripts="totd"
+totd_flags=
+EOF
+
+cat > /etc/totd.conf << \EOF
+; $OpenBSD: totd.conf.sample,v 1.3 2012/08/19 22:30:37 ajacoutot Exp $
+; Totd sample configuration file
+forwarder 2a02:6b8:0:3400::1 port 53
+prefix 64:ff9b::
+retry 300 
+EOF
+
+cat > /etc/hostname.vio0 << \EOF
+rtsol -autoconfprivacy
+up
+!(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
+!/sbin/dhcpcd -4 $if
+#/sbin/dhcpcd -6 $if
+#/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
+!/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
+!(((PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 6; sleep 3) |xargs ping6 -c1 >/dev/console) &)&
+EOF
+
+cat > /etc/hostname.vio1 << \EOF
+rtsol -autoconfprivacy
+up
+!(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
+#/sbin/dhcpcd -4 $if
+#/sbin/dhcpcd -6 $if
+#/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
+!/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
+EOF
+
+[ -f /etc/pf.conf--orig ] || cp /etc/pf.conf /etc/pf.conf--orig
+
+(cd; wget http://www.litech.org/radvd/dist/radvd-2.7.tar.bz2 &&
+    tar jxvf radvd-2.7.tar.bz2 && cd radvd-2.7 && ./configure && make && make install && cd ../ &&
+    rm -rf radvd-2.7 && rm -f radvd-2.7.tar.bz2)
+ 
+if ! grep ipv46_nat64_autoconf /etc/rc.local >/dev/null; then
+    echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 4)' >>/etc/rc.local
+    echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_nat64_autoconf)' >>/etc/rc.local
+fi

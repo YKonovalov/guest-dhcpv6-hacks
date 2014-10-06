@@ -7,8 +7,6 @@
 pkg_add -I curl wget scapy avahi dmidecode isc-dhcp-client mc bash rsync base64 lsof coreutils
 [ -L /usr/local/bin/seq ] || ln -s /usr/local/bin/gseq /usr/local/bin/seq
 
-grep yc2init /etc/rc.conf.local >/dev/null || echo 'pkg_scripts="defroute yc2init"' >> /etc/rc.conf.local
-
 cat > /etc/hostname.vio0 << \EOF
 rtsol -autoconfprivacy
 up

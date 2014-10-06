@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
+
+ONEXIT="$1"
+
+msg(){
+    local P
+    P="${ME}[$$]${i:+(try #$i)}"
+    echo "$P:" "$1" >&2
+    logger -t "$P" "$1"
+}
+
+ipv6_get_global(){
+	ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="lladdr" {E=$2;next}; {if($1=="inet6" && $2!~/%/ && i[1]!="lo0")print $2,i[1],E}'
+}
+ipv6_get_linklocal(){
+	ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="lladdr" {E=$2;next}; {if($1=="inet6" && $2~/%/ && i[1]!="lo0")print $2,i[1],E}'
+}
+
+is_def(){
+	for ver in $1; do
+		ipv=$ver
+		[ $ver -eq 4 ] && ipv=
+		R="$(route -n get -inet$ipv default 2>/dev/null)"
+		if [ $? -eq 0 ]; then
+			router="$(echo "$R"|awk '{if($1=="gateway:")print $2}'|head -1)"
+			iface="$(echo "$R"|awk '{if($1=="interface:")print $2}'|head -1)"
+			ip="$(echo "$R"|awk '{if($1=="if" && $2=="address:")print $3}'|head -1)"
+			echo "$iface $ver $ip $router"
+		fi
+	done
+}
+
+for i in `seq 12`; do
+	DR="$(is_def "4 6")"
+	if [ -z "$DR" ]; then
+		msg "No default route. waiting 5 sec"
+		sleep 5
+		continue
+	fi
+	msg "$DR"
+	iface_count=$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$'|wc -l)
+	version_count=$(echo "$DR"|awk '{print $2}'|sort -u|grep -v '^$'|wc -l)
+	router_count=$(echo "$DR"|awk '{print $3}'|sort -u|grep -v '^$'|wc -l)
+	ipv4_ip=$(echo "$DR"|awk '{if($2==4)print $3}'|sort -u|grep -v '^$'|head -1)
+	ipv4_iface=$(echo "$DR"|awk '{if($2==4)print $1}'|sort -u|grep -v '^$'|head -1)
+	ipv6_iface=$(echo "$DR"|awk '{if($2==6)print $1}'|sort -u|grep -v '^$'|head -1)
+	ipv6_ip=$(ipv6_get_global_permanent |awk -v iface=$ipv6_iface '{if($2==iface)print $1}'|head -1)
+	ipv6=$(echo "$DR"|awk '{if($2==6)print $3}'|sort -u|grep -v '^$'|head -1)
+	ipv6ll_ip=$(ipv6_get_ipv6ll_by_iface $ipv6_iface)
+	ifaces=$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$')
+	ifaces_all=$(ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="lladdr" {E=$2;next}; {if($1=="status:" && E!="")print i[1]}')
+	ifaces_v6_type="dhcp"
+	ifaces_v6=$(ipv6_get_global_permanent)
+	if [ -z "$ifaces_v6" ]; then
+		ifaces_v6=$(ipv6_get_global)
+		ifaces_v6_type="slaac"
+		if [ -z "$ifaces_v6" ]; then
+			ifaces_v6=$(ipv6_get_linklocal)
+			ifaces_v6_type="linklocal"
+			if [ -z "$ifaces_v6" ]; then
+				msg "No IPv6 interfaces found. waiting 5 sec"
+				sleep 5
+				continue
+			fi
+		fi
+	fi
+	ifaces_v6_table="$ifaces_v6"
+	ifaces_v6="$(echo "$ifaces_v6"|awk '{print $2}')"
+	nat64_ifaces="$(echo "$ifaces_v6"|grep -v "$ipv4_iface")"
+	nat64_ifaces="${nat64_ifaces:-$ifaces_v6}"
+	nat64_ifaces_count="$(echo "$nat64_ifaces"|wc -l)"
+
+		msg "              All Interfaces: $(echo $ifaces_all)"
+		msg "    Default Route Interfaces: $ifaces"
+		msg "IPv6 default route interface: $ipv6_iface"
+		msg "IPv4 default route interface: $ipv4_iface"
+		msg "         All IPv6 Interfaces: $(echo $ifaces_v6)"
+		msg "    All IPv6 Interfaces type: $ifaces_v6_type"
+		msg ""
+		msg " Translation IPv6 interfaces: $nat64_ifaces"
+		msg "                 Public IPv4: $ipv4_ip"
+		msg ""
+	
+	if ! [ $iface_count -gt 0 -a $iface_count -lt 3 ]; then
+		msg "Interface count is $iface_count. Unsupported. Exiting."
+		exit 1
+	fi
+	if ! [ $version_count -eq 2 -a $version_count -eq $router_count ]; then
+		msg "Problem with routes. Exiting"
+		exit 2
+	fi
+	if ! [ $nat64_ifaces_count -eq 1 ]; then
+		msg "NAT64 interface should be only one. Exiting"
+		exit 2
+	fi
+
+		AS=
+		for iface in $nat64_ifaces; do
+	        	ipv6ll_ip=$(ipv6_get_ipv6ll_by_iface $iface)
+			ipv6_ip="$(ipv6_get_global_permanent |awk -v iface=$iface '{if($2==iface)print $1}'|head -1)"
+			ipv6_ip="${ipv6_ip:-$(ipv6_get_global |awk -v iface=$iface '{if($2==iface)print $1}'|head -1)}"
+			ipv6_ip="${ipv6_ip:-$(ipv6_get_linklocal |awk -v iface=$iface '{if($2==iface)print $1}'|head -1)}"
+			if [ -z "$ipv6_ip" -o -z "$ipv4_ip" ]; then
+				msg "Missing IPv6 or IPv4. Waiting 5 sec"
+				sleep 5
+				continue
+			fi
+		msg "   Router IPv6LL for NAT64 over $iface: ${ipv6ll_ip%%%*}"
+		msg "     Public IPv6 for DNS64 over $iface: $ipv6_ip"
+		msg ""
+		AS="pass in log on $iface inet6 from any to 64:ff9b::/96 af-to inet from $ipv4_ip"
+		done
+		if [ -z "$AS" ]; then
+			msg "Nothing to apply. Waiting 5 sec"
+			sleep 5
+			continue
+		fi
+		msg "Applying nat64 rules"
+		cat /etc/pf.conf--orig |sed "/#block in quick/ i \\
+$AS \\
+" > /etc/pf.conf--auto
+		pfctl -f /etc/pf.conf--auto
+	exit 0
+done

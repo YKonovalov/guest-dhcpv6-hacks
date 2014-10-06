@@ -19,7 +19,7 @@ duid_dhclient	/var/lib/dhcp/dhclient6.leases
 duid_dhclient	/var/db/dhclient6.IFACE.leases
 duid_dhclient	/var/db/dhclient6.leases
 duid_dhcpv6	/var/lib/dhcpv6/client6.leases /var/lib/dhcpv6/dhcp6c_duid
-duid_dhcpcd	/var/db/dhcpcd-vio0.lease6 /etc/dhcpcd.duid
+duid_dhcpcd	/var/db/dhcpcd-IFACE.lease6 /etc/dhcpcd.duid
 "
 
 duid_dhclient(){
