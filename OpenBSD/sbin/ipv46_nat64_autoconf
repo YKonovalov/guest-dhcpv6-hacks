@@ -43,6 +43,9 @@ is_def(){
 }
 
 for i in `seq 12`; do
+	####
+	### Default routes
+	#
 	DR="$(is_def "4 6")"
 	if [ -z "$DR" ]; then
 		msg "No default route. waiting 5 sec"
@@ -50,102 +53,85 @@ for i in `seq 12`; do
 		continue
 	fi
 	msg "$DR"
-	iface_count=$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$'|wc -l)
-	version_count=$(echo "$DR"|awk '{print $2}'|sort -u|grep -v '^$'|wc -l)
-	router_count=$(echo "$DR"|awk '{print $3}'|sort -u|grep -v '^$'|wc -l)
+
+	iface_dr_count=$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$'|wc -l)
+	dr_version_count=$(echo "$DR"|awk '{print $2}'|sort -u|grep -v '^$'|wc -l)
+	dr_router_count=$(echo "$DR"|awk '{print $3}'|sort -u|grep -v '^$'|wc -l)
+
+	if ! [ $iface_dr_count -gt 0 -a $iface_dr_count -lt 3 ] ||
+	   ! [ $dr_version_count -eq 2 -a $dr_version_count -eq $dr_router_count ]; then
+		msg "Waiting for default routes to assign."
+		sleep 5
+		continue
+	fi
+
+	ifaces_dr="$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$')"
 	ipv4_ip="$(echo "$DR"|awk '{if($2==4)print $3}'|sort -u|grep -v '^$'|head -1)"
 	ipv4_iface="$(echo "$DR"|awk '{if($2==4)print $1}'|sort -u|grep -v '^$'|head -1)"
 	ipv6_iface="$(echo "$DR"|awk '{if($2==6)print $1}'|sort -u|grep -v '^$'|head -1)"
-	ipv6_ip="$(ipv6_get_global_permanent |awk -v iface=$ipv6_iface '{if($2==iface)print $1}'|head -1)"
-	ipv6="$(echo "$DR"|awk '{if($2==6)print $3}'|sort -u|grep -v '^$'|head -1)"
-	ipv6ll_ip="$(ipv6_get_ipv6ll_by_iface $ipv6_iface)"
-	ifaces="$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$')"
+
+	if [ -z "$ipv4_ip" ]; then
+		msg "Waiting for IPv4"
+		sleep 10
+		continue
+	fi
+
 	ifaces_all="$(ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="lladdr" {E=$2;next}; {if($1=="status:" && E!="")print i[1]}')"
-	ifaces_v6_type="dhcp"
-	ifaces_v6=$(ipv6_get_global_permanent)
-	if [ -z "$ifaces_v6" ]; then
-		ifaces_v6=$(ipv6_get_global)
-		ifaces_v6_type="slaac"
-		if [ -z "$ifaces_v6" ]; then
-			ifaces_v6=$(ipv6_get_linklocal)
-			ifaces_v6_type="linklocal"
-			if [ -z "$ifaces_v6" ]; then
-				msg "No IPv6 interfaces found. waiting 5 sec"
-				sleep 5
-				continue
-			fi
-		fi
-	fi
-	ifaces_v6_table="$ifaces_v6"
-	ifaces_v6="$(echo "$ifaces_v6"|awk '{print $2}'|sort -u)"
-	nat64_ifaces="$(echo "$ifaces_v6"|grep -v "$ipv4_iface")"
-	nat64_ifaces="${nat64_ifaces:-$ifaces_v6}"
-	nat64_ifaces_count="$(echo "$nat64_ifaces"|wc -l)"
 
-		msg "              All Interfaces: $(echo $ifaces_all)"
-		msg "    Default Route Interfaces: $(echo $ifaces)"
-		msg "IPv6 default route interface: $ipv6_iface"
-		msg "IPv4 default route interface: $ipv4_iface"
-		msg "         All IPv6 Interfaces: $(echo $ifaces_v6)"
-		msg "    All IPv6 Interfaces type: $ifaces_v6_type"
-		msg ""
-		msg " Translation IPv6 interfaces: $nat64_ifaces"
-		msg "                 Public IPv4: $ipv4_ip"
-		msg ""
-	
-	if ! [ $iface_count -gt 0 -a $iface_count -lt 3 ]; then
-		msg "Interface count is $iface_count. Unsupported. Exiting."
-		exit 1
-	fi
-	if ! [ $version_count -eq 2 -a $version_count -eq $router_count ]; then
-		msg "Problem with routes. Exiting"
-		exit 2
-	fi
-	if ! [ $nat64_ifaces_count -eq 1 ]; then
-		msg "NAT64 interface should be only one. Exiting"
+	nat64_iface="$(echo "$ifaces_all"|grep -v "$ipv4_iface")"
+	nat64_iface="${nat64_iface:-$ipv4_iface}"
+	nat64_iface_count="$(echo "$nat64_iface"|wc -l)"
+	if [ $nat64_iface_count -gt 1 ]; then
+		msg "ERROR: NAT64 interface should be only one. Exiting"
 		exit 2
 	fi
 
-		AS=
-		for iface in $nat64_ifaces; do
-	        	ipv6ll_ip=$(ipv6_get_ipv6ll_by_iface $iface)
-			ipv6_ip="$(ipv6_get_global_permanent |awk -v iface=$iface '{if($2==iface)print $1}'|head -1)"
-			ipv6_ip="${ipv6_ip:-$(ipv6_get_global |awk -v iface=$iface '{if($2==iface)print $1}'|head -1)}"
-			ipv6_ip="${ipv6_ip:-$(ipv6_get_linklocal |awk -v iface=$iface '{if($2==iface)print $1}'|head -1)}"
-			if [ -z "$ipv6_ip" -o -z "$ipv4_ip" ]; then
-				msg "Missing IPv6 or IPv4. Waiting 5 sec"
-				sleep 5
-				continue
-			fi
-		msg "   Router IPv6LL for NAT64 on $iface: ${ipv6ll_ip%%%*}"
-		msg "     Public IPv6 for DNS64 on $iface: $ipv6_ip"
-		msg ""
-		AS="pass in log on $iface inet6 from any to 64:ff9b::/96 af-to inet from $ipv4_ip"
-		done
-		if [ -z "$AS" ]; then
-			msg "Nothing to apply. Waiting 5 sec"
-			sleep 5
-			continue
-		fi
-		msg "Applying nat64 rules"
-		cat /etc/pf.conf--orig |sed "/#block in quick/ i \\
+	ipv6ll_ip=$(ipv6_get_ipv6ll_by_iface $nat64_iface)
+	ipv6_ip="$(ipv6_get_global_permanent |awk -v iface=$nat64_iface '{if($2==iface)print $1}'|head -1)"
+	ipv6_ip="${ipv6_ip:-$(ipv6_get_global |awk -v iface=$nat64_iface '{if($2==iface)print $1}'|head -1)}"
+	if [ -z "$ipv6_ip" ]; then
+		msg "Waiting for global IPv6 for $nat64_iface"
+		sleep 5
+		continue 2
+	fi
+	AS="pass in log on $nat64_iface inet6 from any to 64:ff9b::/96 af-to inet from $ipv4_ip"
+
+	msg "              All Interfaces: $(echo $ifaces_all)"
+	msg "    Default Route Interfaces: $(echo $ifaces_dr)"
+	msg "IPv6 default route interface: $ipv6_iface"
+	msg "IPv4 default route interface: $ipv4_iface"
+	msg ""
+	msg "  Translation IPv6 interface: $nat64_iface"
+	msg "                 Public IPv4: $ipv4_ip"
+	msg ""
+	msg "   Router IPv6LL for NAT64 on $iface: ${ipv6ll_ip%%%*}"
+	msg "     Public IPv6 for DNS64 on $iface: $ipv6_ip"
+	msg ""
+
+	msg "Applying nat64 rules"
+	AS="pass in log on $nat64_iface inet6 from any to 64:ff9b::/96 af-to inet from $ipv4_ip"
+	cat /etc/pf.conf--orig |sed "/#block in quick/ i \\
 $AS \\
 " > /etc/pf.conf--auto
-		pfctl -f /etc/pf.conf--auto
+	pfctl -f /etc/pf.conf--auto
 
-		msg "Announcing NAT64 Route Information and DNS64 on $iface using RA-RIO"
-		pkill rtadvd
-		echo "$iface:raflags=\"mo\":rltime#0:pinfoflags#0:mtu#1450:addr=\"64:ff9b::\":prefixlen#96:rtprefix=\"64:ff9b::\":rtplen#96:rtltime#1800:rdnss=\"$ipv6_ip\":" > /etc/rtadvd.conf--nat64
-		rtadvd -s -c /etc/rtadvd.conf--nat64 $iface
+	msg "Announcing NAT64 Route Information and DNS64 on $iface using RA-RIO"
+	pkill rtadvd
+	echo "$nat64_iface:raflags=\"mo\":rltime#0:pinfoflags#0:mtu#1450:addr=\"64:ff9b::\":prefixlen#96:rtprefix=\"64:ff9b::\":rtplen#96:rtltime#1800:rdnss=\"$ipv6_ip\":" > /etc/rtadvd.conf--nat64
+	rtadvd -s -c /etc/rtadvd.conf--nat64 $nat64_iface
 
-		msg ""
-		msg "To use NAT64 on host O To enable NAT64 route announce in linux:"
-		msg " To enable NAT64 route announce in linux:"
-		msg "   sysctl net.ipv6.conf.eth0.accept_ra_rt_info_max_plen=96"
-		msg "        or"
-		msg " To add static route:"
-		msg "   ip r a 64:ff9b::/96 via ${ipv6ll_ip%%%*}%eth0"
-		msg ""
+	msg ""
+	msg "HINT: On the host you need to add NAT64 route and use DNS64 nameserver above"
+	msg ""
+	msg " To enable linux to listen for NAT64 route announce:"
+	msg "   sysctl net.ipv6.conf.eth0.accept_ra_rt_info_max_plen=96"
+	msg "        or"
+	msg " To add static route:"
+	msg "   ip r a 64:ff9b::/96 via ${ipv6ll_ip%%%*}%eth0"
+	msg ""
+	msg " Line to replace in resolv.conf:"
+	msg "   nameserver $ipv6_ip"
+	msg ""
 
 	exit 0
 done
