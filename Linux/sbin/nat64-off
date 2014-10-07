@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
+
+ONEXIT="$1"
+
+msg(){
+    local P
+    P="${ME}[$$]${i:+(try #$i)}"
+    echo "$P:" "$1" >&2
+    logger -t "$P" "$1"
+}
+if which resolvconf >/dev/null; then
+	if ! resolvconf --updates-are-enabled; then
+		if ! resolvconf --enable-updates; then
+			msg "ERROR: Could not enable resolvconf updates"
+			exit 3
+		fi
+	fi
+	if ! resolvconf -d nat64; then
+		msg "ERROR: Failed to update resolvconf to remove NAT64 nameserver"
+	fi
+else
+	if [ -f /etc/resolv.conf--nat64 ]; then
+		if comp cat 
+fi
+
+msg "DNS64 is now disabled. (use ${ME%%-*}-on to enable)"
+

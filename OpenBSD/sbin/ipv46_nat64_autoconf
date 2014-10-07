@@ -26,6 +26,7 @@ ipv6_get_linklocal(){
 }
 
 is_def(){
+	local ver ipv router iface ip
 	for ver in $1; do
 		ipv=$ver
 		[ $ver -eq 4 ] && ipv=
@@ -34,7 +35,9 @@ is_def(){
 			router="$(echo "$R"|awk '{if($1=="gateway:")print $2}'|head -1)"
 			iface="$(echo "$R"|awk '{if($1=="interface:")print $2}'|head -1)"
 			ip="$(echo "$R"|awk '{if($1=="if" && $2=="address:")print $3}'|head -1)"
-			echo "$iface $ver $ip $router"
+			if [ -n "$iface" -a -n "$ip" -a -n "router" ]; then
+				echo "$iface $ver $ip $router"
+			fi
 		fi
 	done
 }
@@ -50,14 +53,14 @@ for i in `seq 12`; do
 	iface_count=$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$'|wc -l)
 	version_count=$(echo "$DR"|awk '{print $2}'|sort -u|grep -v '^$'|wc -l)
 	router_count=$(echo "$DR"|awk '{print $3}'|sort -u|grep -v '^$'|wc -l)
-	ipv4_ip=$(echo "$DR"|awk '{if($2==4)print $3}'|sort -u|grep -v '^$'|head -1)
-	ipv4_iface=$(echo "$DR"|awk '{if($2==4)print $1}'|sort -u|grep -v '^$'|head -1)
-	ipv6_iface=$(echo "$DR"|awk '{if($2==6)print $1}'|sort -u|grep -v '^$'|head -1)
-	ipv6_ip=$(ipv6_get_global_permanent |awk -v iface=$ipv6_iface '{if($2==iface)print $1}'|head -1)
-	ipv6=$(echo "$DR"|awk '{if($2==6)print $3}'|sort -u|grep -v '^$'|head -1)
-	ipv6ll_ip=$(ipv6_get_ipv6ll_by_iface $ipv6_iface)
-	ifaces=$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$')
-	ifaces_all=$(ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="lladdr" {E=$2;next}; {if($1=="status:" && E!="")print i[1]}')
+	ipv4_ip="$(echo "$DR"|awk '{if($2==4)print $3}'|sort -u|grep -v '^$'|head -1)"
+	ipv4_iface="$(echo "$DR"|awk '{if($2==4)print $1}'|sort -u|grep -v '^$'|head -1)"
+	ipv6_iface="$(echo "$DR"|awk '{if($2==6)print $1}'|sort -u|grep -v '^$'|head -1)"
+	ipv6_ip="$(ipv6_get_global_permanent |awk -v iface=$ipv6_iface '{if($2==iface)print $1}'|head -1)"
+	ipv6="$(echo "$DR"|awk '{if($2==6)print $3}'|sort -u|grep -v '^$'|head -1)"
+	ipv6ll_ip="$(ipv6_get_ipv6ll_by_iface $ipv6_iface)"
+	ifaces="$(echo "$DR"|awk '{print $1}'|sort -u|grep -v '^$')"
+	ifaces_all="$(ifconfig |awk '/^[^[:blank:]]+:/ {split($1, i, ":");E="";next}; $1=="lladdr" {E=$2;next}; {if($1=="status:" && E!="")print i[1]}')"
 	ifaces_v6_type="dhcp"
 	ifaces_v6=$(ipv6_get_global_permanent)
 	if [ -z "$ifaces_v6" ]; then
@@ -74,13 +77,13 @@ for i in `seq 12`; do
 		fi
 	fi
 	ifaces_v6_table="$ifaces_v6"
-	ifaces_v6="$(echo "$ifaces_v6"|awk '{print $2}')"
+	ifaces_v6="$(echo "$ifaces_v6"|awk '{print $2}'|sort -u)"
 	nat64_ifaces="$(echo "$ifaces_v6"|grep -v "$ipv4_iface")"
 	nat64_ifaces="${nat64_ifaces:-$ifaces_v6}"
 	nat64_ifaces_count="$(echo "$nat64_ifaces"|wc -l)"
 
 		msg "              All Interfaces: $(echo $ifaces_all)"
-		msg "    Default Route Interfaces: $ifaces"
+		msg "    Default Route Interfaces: $(echo $ifaces)"
 		msg "IPv6 default route interface: $ipv6_iface"
 		msg "IPv4 default route interface: $ipv4_iface"
 		msg "         All IPv6 Interfaces: $(echo $ifaces_v6)"
@@ -114,8 +117,8 @@ for i in `seq 12`; do
 				sleep 5
 				continue
 			fi
-		msg "   Router IPv6LL for NAT64 over $iface: ${ipv6ll_ip%%%*}"
-		msg "     Public IPv6 for DNS64 over $iface: $ipv6_ip"
+		msg "   Router IPv6LL for NAT64 on $iface: ${ipv6ll_ip%%%*}"
+		msg "     Public IPv6 for DNS64 on $iface: $ipv6_ip"
 		msg ""
 		AS="pass in log on $iface inet6 from any to 64:ff9b::/96 af-to inet from $ipv4_ip"
 		done
@@ -129,5 +132,20 @@ for i in `seq 12`; do
 $AS \\
 " > /etc/pf.conf--auto
 		pfctl -f /etc/pf.conf--auto
+
+		msg "Announcing NAT64 Route Information and DNS64 on $iface using RA-RIO"
+		pkill rtadvd
+		echo "$iface:raflags=\"mo\":rltime#0:pinfoflags#0:mtu#1450:addr=\"64:ff9b::\":prefixlen#96:rtprefix=\"64:ff9b::\":rtplen#96:rtltime#1800:rdnss=\"$ipv6_ip\":" > /etc/rtadvd.conf--nat64
+		rtadvd -s -c /etc/rtadvd.conf--nat64 $iface
+
+		msg ""
+		msg "To use NAT64 on host O To enable NAT64 route announce in linux:"
+		msg " To enable NAT64 route announce in linux:"
+		msg "   sysctl net.ipv6.conf.eth0.accept_ra_rt_info_max_plen=96"
+		msg "        or"
+		msg " To add static route:"
+		msg "   ip r a 64:ff9b::/96 via ${ipv6ll_ip%%%*}%eth0"
+		msg ""
+
 	exit 0
 done

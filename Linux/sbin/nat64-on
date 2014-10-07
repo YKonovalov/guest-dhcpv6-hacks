@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
+
+ONEXIT="$1"
+
+msg(){
+    local P
+    P="${ME}[$$]${i:+(try #$i)}"
+    echo "$P:" "$1" >&2
+    logger -t "$P" "$1"
+}
+get6route(){
+	ip -6 r g $1 |sed -n "s/^.*via[[:blank:]]\+\([[:alnum:]:]\+\)[[:blank:]]\+dev[[:blank:]]\+\([^[:blank:]]\+\)[[:blank:]]\+.*$/\1 \2/p"|head -1
+}
+check_ra(){
+	local iface=$1
+	local maxplen
+	maxplen=$(sysctl net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen|awk '{print $3}')
+	if [ -z "$maxplen" ]; then
+		dolog "unable to get maxplen for $iface"
+		return 1
+	fi
+	if [ $maxplen -lt 96 ]; then
+		return 2
+	fi
+}
+
+precheck(){
+if ! check_ra eth0; then
+	msg "Enabling IPv6 route information support (RA-RIO)"
+	if ! enable_ra eth0; then
+		return 1
+	fi
+fi
+}
+
+DEFR6="$(get6route "::")"
+NAT64="$(get6route "64:ff9b::1")"
+if [ -z "$NAT64" -o "$NAT64" = "$DEFR6" ]; then
+	msg "No NAT64 routes present"
+	exit 1
+fi
+NAT64_LL=${NAT64%% *}
+NAT64_IF=${NAT64##* }
+msg "NAT64 router: $NAT64_LL"
+DNS64="$(rdisc6 -1 $NAT64_LL $NAT64_IF|awk '/Recursive DNS server/ {print $5}'|head -1)"
+if [ -z "$DNS64" ]; then
+	msg "No DNS64 addresses announced"
+	exit 2
+fi
+
+msg "DNS64 server: $DNS64"
+
+if which resolvconf >/dev/null; then
+	if ! resolvconf --updates-are-enabled; then
+		if ! resolvconf --enable-updates; then
+			msg "ERROR: Could not enable resolvconf updates"
+			exit 3
+		fi
+	fi
+	if ! echo "nameserver $DNS64"| resolvconf -a nat64; then
+		msg "ERROR: Failed to update resolvconf with NAT64 nameserver"
+	fi
+	if ! resolvconf --disable-updates; then
+		msg "ERROR: Failed to disable resolvconf updates"
+	fi
+	filter='cat'
+else
+	cp -f /etc/resolv.conf /etc/resolv.conf--pre-nat64
+	filter='tee /etc/resolv.conf--nat64'
+fi
+
+# Real update
+T="$(mktemp)"
+grep -v "^nameserver" /etc/resolv.conf > "$T"
+(cat "$T"; echo "nameserver $DNS64") | $filter > /etc/resolv.conf
+
+msg "DNS64 is now enabled. (use ${ME%%-*}-off to disable)"
+

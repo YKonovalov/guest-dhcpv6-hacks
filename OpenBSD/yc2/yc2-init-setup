@@ -7,20 +7,27 @@
 pkg_add -I curl wget scapy avahi dmidecode isc-dhcp-client mc bash rsync base64 lsof coreutils
 [ -L /usr/local/bin/seq ] || ln -s /usr/local/bin/gseq /usr/local/bin/seq
 
+(cd; wget http://roy.marples.name/downloads/openresolv/openresolv-3.5.7.tar.bz2 && tar jxvf openresolv-3.5.7.tar.bz2 && cd openresolv-3.5.7 && ./configure && make install && cd ../ && rm -rf openresolv-3.5.7 && rm -f openresolv-3.5.7.tar.bz2)
+(cd; wget http://roy.marples.name/downloads/dhcpcd/dhcpcd-6.4.7.tar.bz2 &&
+    tar jxvf dhcpcd-6.4.7.tar.bz2 && cd dhcpcd-6.4.7 && ./configure && make && make install && cd ../ &&
+    rm -rf dhcpcd-6.4.7 && rm -f dhcpcd-6.4.7.tar.bz2)
+
+[ -f /etc/dhcpcd.conf--orig ] || cp /etc/dhcpcd.conf /etc/dhcpcd.conf--orig
+sed "s/^\(slaac private.*\)/slaac hwaddr/" /etc/dhcpcd.conf--orig > /etc/dhcpcd.conf
+echo "script /usr/local/sbin/dhclient-script-resolvconf" >> /etc/dhcpcd.conf
+
 cat > /etc/hostname.vio0 << \EOF
 rtsol -autoconfprivacy
 up
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
 !/sbin/dhcpcd -4 $if
-#/sbin/dhcpcd -6 $if
-#/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
 !/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
-!(((PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 6; sleep 3) |xargs ping6 -c1 >/dev/console) &)&
+!(PATH=$PATH:/usr/local/sbin:/usr/local/bin ndisc_update &)&
 EOF
 
-sed -e "s:cat \(.*std\)\(6*\) > /etc/resolv.conf$:resolvconf -a \${interface}-dhcp\2 < \1\2:" \
-    -e "1,/EXPIRE6/ s:cat \(.*save\) > /etc/resolv.conf$:resolvconf -d \${interface}-dhcp:" \
-    -e "/EXPIRE6/,$ s:cat \(.*save\) > /etc/resolv.conf$:resolvconf -d \${interface}-dhcp6:" \
+sed -e "s:cat \(.*std\)\(6*\) > /etc/resolv.conf$:resolvconf -a \${interface}.dhcp\2 < \1\2:" \
+    -e "1,/EXPIRE6/ s:cat \(.*save\) > /etc/resolv.conf$:resolvconf -d \${interface}.dhcp:" \
+    -e "/EXPIRE6/,$ s:cat \(.*save\) > /etc/resolv.conf$:resolvconf -d \${interface}.dhcp6:" \
     /usr/local/sbin/dhclient-script > /usr/local/sbin/dhclient-script-resolvconf
 chmod a+x /usr/local/sbin/dhclient-script-resolvconf
 
@@ -33,11 +40,6 @@ EOF
 
 [ -f /etc/dhclient-exit-hooks ] || (printf '[ "$reason" = "BOUND6" ] && (PATH=$PATH:/usr/local/sbin:/usr/local/bin /usr/local/sbin/ndisc_update $new_ip6_address $interface </dev/null >/dev/console 2>&1 &) &\n. /usr/local/sbin/dhclient-exit-hooks-rfc3442-classless-routes\n' > /etc/dhclient-exit-hooks && chmod a+x /etc/dhclient-exit-hooks)
 
-(cd; wget http://roy.marples.name/downloads/openresolv/openresolv-3.5.7.tar.bz2 && tar jxvf openresolv-3.5.7.tar.bz2 && cd openresolv-3.5.7 && ./configure && make install && cd ../ && rm -rf openresolv-3.5.7 && rm -f openresolv-3.5.7.tar.bz2)
-(cd; wget http://roy.marples.name/downloads/dhcpcd/dhcpcd-6.4.7.tar.bz2 &&
-    tar jxvf dhcpcd-6.4.7.tar.bz2 && cd dhcpcd-6.4.7 && ./configure && make && make install && cd ../ &&
-    rm -rf dhcpcd-6.4.7 && rm -f dhcpcd-6.4.7.tar.bz2)
- 
 [ -f /etc/boot.conf ] || echo "set tty com0" > /etc/boot.conf
 
 chsh -s /usr/local/bin/bash root
@@ -45,6 +47,10 @@ chsh -s /usr/local/bin/bash root
 
 [ -f /etc/ssh/sshd_config--orig ] || cp /etc/ssh/sshd_config /etc/ssh/sshd_config--orig
 sed "s/^#PasswordAuthentication yes.*/PasswordAuthentication no/" /etc/ssh/sshd_config--orig >/etc/ssh/sshd_config
+
+cat >> ~/.bash_profile << \EOF
+PS1="[\u@\h \W]\\$ "
+EOF
 
 cat >> /etc/profile << \EOF
 MAN_PATH=$MAN_PATH:/usr/local/share/man

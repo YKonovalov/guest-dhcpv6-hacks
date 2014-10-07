@@ -19,32 +19,29 @@ prefix 64:ff9b::
 retry 300 
 EOF
 
+[ -f /etc/sysctl.conf--orig ] || cp /etc/sysctl.conf /etc/sysctl.conf--orig
+sed "s/net.inet6.ip6.accept_rtadv=1/net.inet6.ip6.accept_rtadv=0/" /etc/sysctl.conf--orig > /etc/sysctl.conf
+
 cat > /etc/hostname.vio0 << \EOF
-rtsol -autoconfprivacy
 up
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
 !/sbin/dhcpcd -4 $if
-#/sbin/dhcpcd -6 $if
-#/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
 !/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
-!(((PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 6; sleep 3) |xargs ping6 -c1 >/dev/console) &)&
+!(PATH=$PATH:/usr/local/sbin:/usr/local/bin ndisc_update &)&
 EOF
 
 cat > /etc/hostname.vio1 << \EOF
-rtsol -autoconfprivacy
 up
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
-#/sbin/dhcpcd -4 $if
-#/sbin/dhcpcd -6 $if
-#/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
+!/usr/local/sbin/dhclient -4 -nw -pf /var/run/dhclient.$if.pid -lf /var/db/dhclient.$if.leases $if
 !/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
 EOF
 
 [ -f /etc/pf.conf--orig ] || cp /etc/pf.conf /etc/pf.conf--orig
 
-(cd; wget http://www.litech.org/radvd/dist/radvd-2.7.tar.bz2 &&
-    tar jxvf radvd-2.7.tar.bz2 && cd radvd-2.7 && ./configure && make && make install && cd ../ &&
-    rm -rf radvd-2.7 && rm -f radvd-2.7.tar.bz2)
+#(cd; wget http://www.litech.org/radvd/dist/radvd-2.7.tar.bz2 &&
+#    tar jxvf radvd-2.7.tar.bz2 && cd radvd-2.7 && ./configure && make && make install && cd ../ &&
+#    rm -rf radvd-2.7 && rm -f radvd-2.7.tar.bz2)
  
 if ! grep ipv46_nat64_autoconf /etc/rc.local >/dev/null; then
     echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 4)' >>/etc/rc.local
