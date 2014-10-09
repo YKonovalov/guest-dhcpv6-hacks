@@ -32,11 +32,13 @@ freebsd: $(freebsd)
 	for f in $(freebsd_init); do echo "base64 --decode <<< $$(base64 -w0 $$f) >/usr/local/etc/rc.d/$${f##*/}" >> $@; done
 	for f in $(freebsd_yc2); do echo "base64 --decode <<< $$(base64 -w0 $$f) >/yc2/$${f##*/}" >> $@; printf "chmod a+x /yc2/$${f##*/}\n\n" >> $@; done
 
-openbsd: $(openbsd)
-	cat OpenBSD/yc2/yc2-init-setup > $@
+openbsd-update: $(openbsd)
 	for f in $^; do echo "base64 -d <<< $$(base64 -w0 $$f) > /usr/local/sbin/$${f##*/}" >> $@; printf "chmod a+x /usr/local/sbin/$${f##*/}\n\n" >> $@; done
 	#for f in $(openbsd_init); do echo "base64 -d <<< $$(base64 -w0 $$f) > /etc/rc.d/$${f##*/}" >> $@; printf "chmod a+x /etc/rc.d/$${f##*/}\n\n" >> $@; done
 	for f in $(openbsd_yc2); do echo "base64 -d <<< $$(base64 -w0 $$f) > /yc2/$${f##*/}" >> $@; printf "chmod a+x /yc2/$${f##*/}\n\n" >> $@; done
+
+openbsd: openbsd-update
+	cat OpenBSD/yc2/yc2-init-setup $^ > $@
 
 altrpm: $(linux)
 	cat /dev/null > $@
@@ -47,6 +49,6 @@ altbsd: $(freebsd)
 	for f in $^; do printf "cat > /usr/local/sbin/$${f##*/} << \\\EOF\n" >> $@; cat $$f >>$@; printf "EOF\nchmod a+x /usr/local/sbin/$${f##*/}\n\n" >> $@; done
 
 clean:
-	rm -f preceed freebsd linux altrpm altbsd openbsd hardy
+	rm -f preceed freebsd linux altrpm altbsd openbsd openbsd-update hardy
 
 .PHONY: all preceed hardy rpm freebsd openbsd altbsd altrpm clean distclean

@@ -1,3 +1,94 @@
+#!/usr/bin/env bash
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin
+
+ME=${0##*/}
+
+FDS="$(lsof -a -p $$ -d'^0-2,^255' 2>/dev/null|awk '{if($4~/^[0-9]+/){gsub(/[^0-9]/,"",$4);print $4}}')"
+for fdd in $FDS; do
+	eval "exec $fdd>&-"
+done
+
+msg(){
+	echo "$1"
+	logger -t "${ME}[$$]" "$1"
+}
+
+ipv6_hex(){
+  local ip n=
+  local -a quad
+   ip=$1
+    IFS=':' read -ra quad <<<"$ip"
+    for i in ${!quad[@]}; do
+	if [ -n "${quad[i]}" ]; then
+	    n="$n`printf "%04x" $((16#${quad[i]}))`"
+	else
+	    n="$n`printf "%0$(( (8-${#quad[@]}+1) * 4 ))x"`"
+	fi
+    done
+    echo $n
+}
+
+ipv6_expanded_from_hex(){
+  local hex=$1
+    echo $hex|sed -e "s/\(.\{4\}\)/\1:/g" -e "s/:$//"|tr '[:upper:]' '[:lower:]'
+}
+
+ipv6_expand(){
+  local ip hex
+   ip=$1
+    hex=$(ipv6_hex $ip)
+    echo $(ipv6_expanded_from_hex $hex)
+}
+
+plen_to_mask(){
+  local masklen octs ones zeros m reverse
+   masklen=$1
+   plen=$2
+   reverse=$3
+    octs=$((masklen/4))
+    ones=$( printf "%${plen}s" ' ' )
+    zeros=$( printf "%$((masklen-plen))s" ' ' ) #"
+    if [ -z "$reverse" ]; then
+    	m=${ones// /1}${zeros// /0}
+    else
+    	m=${ones// /0}${zeros// /1}
+    fi
+    mh=$(echo "ibase=2;obase=10000;1$m"|bc)
+    echo ${mh:1}
+}
+
+ipv6_masked_addr(){
+  local ip plen inc n mask masked inced
+   ip=$1
+   plen=$2
+   inc=${3:-1}
+    n=$(ipv6_hex $ip)
+    mask=$(plen_to_mask 128 $plen)
+    masked=$(printf "%016x%016x\n" $((16#${n:0:16} & 16#${mask:0:16})) $((16#${n:16:32} & 16#${mask:16:32}))|tr '[:lower:]' '[:upper:]')
+    inced=$(echo "obase=16;ibase=16;$masked + $inc"|bc)
+    echo $(ipv6_expanded_from_hex $inced)
+}
+
+ipv6_masked_net_to_host(){
+  local net ip plen inc n mask masked inced
+   net=$1
+   plen=$2
+   ip=$3
+    n=$(ipv6_hex $net)
+    mask=$(plen_to_mask 128 $plen)
+    masked_net=$(printf "%016x%016x\n" $((16#${n:0:16} & 16#${mask:0:16})) $((16#${n:16:32} & 16#${mask:16:32}))|tr '[:lower:]' '[:upper:]')
+
+    n=$(ipv6_hex $ip)
+    mask=$(plen_to_mask 128 $plen reverse)
+    masked_host=$(printf "%016x%016x\n" $((16#${n:0:16} & 16#${mask:0:16})) $((16#${n:16:32} & 16#${mask:16:32}))|tr '[:lower:]' '[:upper:]')
+
+    n=$masked_net
+    mask=$masked_host
+    masked=$(printf "%016x%016x\n" $((16#${n:0:16} | 16#${mask:0:16})) $((16#${n:16:32} | 16#${mask:16:32}))|tr '[:lower:]' '[:upper:]')
+
+    echo $(ipv6_expanded_from_hex $masked)
+}
+
 IP=$1
 if [ -z "$IP" ]; then
  echo "ERROR: specify IPv6 address" >&2
@@ -8,12 +99,31 @@ if [ -z "$IFACE" ]; then
 	echo "ERROR: interface not found for $IP" >&2
 	exit 2
 fi
-if ifconfig $IFACE inet6|awk -v ip=$IP '{if($1=="inet6" && $2!~/%/)if($2==ip)exit 0;else exit 1}'; then
-	echo $1 already preffered
-else
-	ifconfig $IFACE inet6 |awk -v ip=$IP '{if($2!=ip && $5=="autoconf")print}'| while read addr; do
-	    echo "Setting $IP preffered by toggling deprecated flag of $addr"
-	    ifconfig $IFACE $addr deprecated
-	    ifconfig $IFACE $addr -deprecated
-	done
+
+#if ifconfig $IFACE inet6|awk -v ip=$IP '{if($1=="inet6" && $2!~/%/)if($2==ip)exit 0;else exit 1}'; then
+#	echo $1 already preffered
+#else
+#	ifconfig $IFACE inet6 |awk -v ip=$IP '{if($2!=ip && $5=="autoconf")print}'| while read addr; do
+#	    echo "Setting $IP preffered by toggling deprecated flag of $addr"
+	#    ifconfig $IFACE $addr deprecated
+	 #   ifconfig $IFACE $addr -deprecated
+	#done
+#fi
+
+GLOBAL=$IP
+LL=$(ipv6_get_ipv6ll_by_iface $IFACE|head -1)
+LL=${LL%%%*}
+old_ll=$(ipv6_expand $LL)
+new_ll=$(ipv6_masked_net_to_host fe80:: 104 $GLOBAL)
+global_deprecated=$(ipv6_masked_net_to_host $GLOBAL 64 $LL)
+
+if [ "$old_ll" = "$new_ll" ]; then
+	msg "$1 already preffered"
+	exit 0
 fi
+
+ifconfig $IFACE inet6 $new_ll prefixlen 64
+ifconfig $IFACE inet6 $old_ll -alias
+ifconfig $IFACE inet6 $global_deprecated prefixlen 64 tentative pltime 0
+ifconfig $IFACE down
+ifconfig $IFACE up

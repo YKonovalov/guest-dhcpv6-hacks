@@ -17,7 +17,6 @@ sed "s/^\(slaac private.*\)/slaac hwaddr/" /etc/dhcpcd.conf--orig > /etc/dhcpcd.
 echo "script /usr/local/sbin/dhclient-script-resolvconf" >> /etc/dhcpcd.conf
 
 cat > /etc/hostname.vio0 << \EOF
-rtsol -autoconfprivacy
 up
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
 !/sbin/dhcpcd -4 $if

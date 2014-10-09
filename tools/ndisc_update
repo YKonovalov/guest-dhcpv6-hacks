@@ -162,7 +162,7 @@ while IFS=/ read net len; do
 			fi
 		done
 	fi
-done <<< $(ipv6_get_onlink_prefixes $IFACE)
+done <<< "$(ipv6_get_onlink_prefixes $IFACE)"
 
 for router in $BACKUP_ROUTERS; do
 	if [ "${router%%%*}" = "$router" ]; then

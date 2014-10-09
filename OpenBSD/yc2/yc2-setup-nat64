@@ -22,6 +22,17 @@ EOF
 [ -f /etc/sysctl.conf--orig ] || cp /etc/sysctl.conf /etc/sysctl.conf--orig
 sed "s/net.inet6.ip6.accept_rtadv=1/net.inet6.ip6.accept_rtadv=0/" /etc/sysctl.conf--orig > /etc/sysctl.conf
 
+#rtsol -autoconfprivacy
+#up
+#!(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
+#!/sbin/dhcpcd -4 $if
+#!(((PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 6; sleep 3) |xargs ping6 -c1 >/dev/console) &)&
+#
+#rtsol -autoconfprivacy
+#up
+
+
+
 cat > /etc/hostname.vio0 << \EOF
 up
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
