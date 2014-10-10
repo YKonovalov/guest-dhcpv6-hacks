@@ -8,29 +8,34 @@ for fdd in $FDS; do
 	eval "exec $fdd>&-"
 done
 
-
-ONEXIT="$1"
-
 msg(){
     local P
     P="${ME}[$$]${i:+(try #$i)}"
     echo "$P:" "$1" >&2
     logger -t "$P" "$1"
 }
-if which resolvconf >/dev/null; then
+if which resolvconf >/dev/null 2>&1; then
 	if ! resolvconf --updates-are-enabled; then
 		if ! resolvconf --enable-updates; then
 			msg "ERROR: Could not enable resolvconf updates"
 			exit 3
 		fi
 	fi
-	if ! resolvconf -d nat64; then
+	if ! resolvconf -u; then
 		msg "ERROR: Failed to update resolvconf to remove NAT64 nameserver"
 	fi
 else
-	if [ -f /etc/resolv.conf--nat64 ]; then
-		if comp cat 
+	if [ -f /etc/resolv.conf--nat64 -a -f /etc/resolv.conf--pre-nat64 ]; then
+		if diff -q /etc/resolv.conf--nat64 /etc/resolv.conf; then
+			cat /etc/resolv.conf--pre-nat64 > /etc/resolv.conf
+		else
+			msg "WARNING: resolv.conf was changed since last nat64 update. Will not restore original from /etc/resolv.conf--pre-nat64" 
+ 		fi
+		rm -f /etc/resolv.conf--nat64
+	else
+		msg "DNS64 has not been enabled"
+		exit
+	fi
 fi
 
 msg "DNS64 is now disabled. (use ${ME%%-*}-on to enable)"
-

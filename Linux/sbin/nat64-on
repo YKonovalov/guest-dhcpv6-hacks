@@ -8,8 +8,7 @@ for fdd in $FDS; do
 	eval "exec $fdd>&-"
 done
 
-
-ONEXIT="$1"
+NAT64_PREFFIX=64:ff9b::/96
 
 msg(){
     local P
@@ -17,15 +16,47 @@ msg(){
     echo "$P:" "$1" >&2
     logger -t "$P" "$1"
 }
-get6route(){
-	ip -6 r g $1 |sed -n "s/^.*via[[:blank:]]\+\([[:alnum:]:]\+\)[[:blank:]]\+dev[[:blank:]]\+\([^[:blank:]]\+\)[[:blank:]]\+.*$/\1 \2/p"|head -1
+
+get_nat64_routers(){
+	ip -6 r s $NAT64_PREFFIX|awk -v r="$NAT64_PREFFIX" '$1==r && $2=="via" && $3~/fe80:/ && $4=="dev" {print $3" "$5}'
 }
+
+get_dns64_servers(){
+local NAT64="$1"
+local DNS64=
+while read router iface; do
+	if [ -z "$router" ]; then
+		continue
+	fi
+	msg "NAT64 router: $router"
+	DNS64="$(rdisc6 -1 $router $iface|awk '/Recursive DNS server/ {print $5}'|head -1)"
+	if [ -z "$DNS64" ]; then
+		msg "No DNS64 addressed announced by $router"
+		continue
+	fi
+	msg "DNS64 server: $DNS64"
+	echo "$DNS64"
+done <<< "$NAT64"
+}
+
 check_ra(){
+	local iface=$1
+	local ra
+	ra=$(sysctl net.ipv6.conf.${iface}.accept_ra|awk '{print $3}')
+	if [ -z "$ra" ]; then
+		dolog "unable to get sysctl var accept_ra for $iface"
+		return 1
+	fi
+	if [ $ra -eq 0 ]; then
+		return 2
+	fi
+}
+check_ra_max_plen(){
 	local iface=$1
 	local maxplen
 	maxplen=$(sysctl net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen|awk '{print $3}')
 	if [ -z "$maxplen" ]; then
-		dolog "unable to get maxplen for $iface"
+		dolog "unable to get sysctl var accept_ra_rt_info_max_plen for $iface"
 		return 1
 	fi
 	if [ $maxplen -lt 96 ]; then
@@ -33,55 +64,96 @@ check_ra(){
 	fi
 }
 
-precheck(){
-if ! check_ra eth0; then
-	msg "Enabling IPv6 route information support (RA-RIO)"
-	if ! enable_ra eth0; then
+enable_ra(){
+	local iface=$1
+	if ! sysctl net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen=96; then
+		dolog "unable to set maxplen for $iface"
 		return 1
 	fi
-fi
 }
 
-DEFR6="$(get6route "::")"
-NAT64="$(get6route "64:ff9b::1")"
-if [ -z "$NAT64" -o "$NAT64" = "$DEFR6" ]; then
-	msg "No NAT64 routes present"
+precheck(){
+	local iface=${1:-eth0}
+	if ! check_ra $iface; then
+		msg "RA is disabled on $iface. Will scan without enabling RA."
+		disc="$(rdisc6 $iface|awk -v preffix="$NAT64_PREFFIX" '$1=="Route" && $2==":" && $3==preffix {P=$3;next}; $1=="from" && P!="" {print P" "$2;P="";next}')"
+		if [ -z "$disc" ]; then
+			msg "Scan on $iface gave no NAT64 routers. Exiting"
+			exit 4
+		fi
+		echo "$disc"| while read p r; do
+			if [ "$p" != "$NAT64_PREFFIX" ]; then
+				msg "BUG: scan gave different preffix. Exiting"
+				exit 5
+			fi
+			if [ -z "$r" ]; then
+				msg "BUG: scan gave empty router. Exiting"
+				exit 6
+			fi
+			msg "ip -6 route add $NAT64_PREFFIX via $r dev $iface"
+			ip -6 route add $NAT64_PREFFIX via $r dev $iface
+		done
+	else
+		msg "Enabling IPv6 route information support (RA-RIO) on $iface"
+		if ! enable_ra $iface; then
+			return 1
+		fi
+		msg "Force route discovery"
+		R=$(rdisc6 -n -q $iface | grep "$NAT64_PREFFIX"|grep -v "^$"|wc -l)
+		msg "There are $R NAT64 routers on the network"
+	fi
+}
+
+checked=
+for i in `seq 12`; do
+	NAT64="$(get_nat64_routers)"
+	if [ -z "$NAT64" ]; then
+		if [ -z "$checked" ]; then
+			msg "No NAT64 routes present"
+			precheck
+			checked=1
+			continue
+		fi
+		sleep 3
+		continue
+	fi
+	break
+done
+i=
+
+if [ -z "$NAT64" ]; then
+	msg "No NAT64 routers announced"
 	exit 1
 fi
-NAT64_LL=${NAT64%% *}
-NAT64_IF=${NAT64##* }
-msg "NAT64 router: $NAT64_LL"
-DNS64="$(rdisc6 -1 $NAT64_LL $NAT64_IF|awk '/Recursive DNS server/ {print $5}'|head -1)"
+
+DNS64="$(get_dns64_servers "$NAT64")"
 if [ -z "$DNS64" ]; then
-	msg "No DNS64 addresses announced"
-	exit 2
+	msg "No DNS64 servers announced"
+	exit 1
 fi
 
-msg "DNS64 server: $DNS64"
+RESOLV="; -=NAT64=- resolver. nat64-off to switch back to original resolv.conf
+$(for i in $DNS64; do echo "nameserver $i"; done)"
 
-if which resolvconf >/dev/null; then
-	if ! resolvconf --updates-are-enabled; then
-		if ! resolvconf --enable-updates; then
-			msg "ERROR: Could not enable resolvconf updates"
-			exit 3
+T="$(mktemp)"
+(grep -v "^nameserver" /etc/resolv.conf|grep -v "NAT64"; echo "$RESOLV") > "$T"
+
+if which resolvconf >/dev/null 2>&1; then
+	if resolvconf --updates-are-enabled; then
+		if ! resolvconf --disable-updates; then
+			msg "ERROR: Failed to disable resolvconf updates"
 		fi
-	fi
-	if ! echo "nameserver $DNS64"| resolvconf -a nat64; then
-		msg "ERROR: Failed to update resolvconf with NAT64 nameserver"
-	fi
-	if ! resolvconf --disable-updates; then
-		msg "ERROR: Failed to disable resolvconf updates"
 	fi
 	filter='cat'
 else
-	cp -f /etc/resolv.conf /etc/resolv.conf--pre-nat64
+	if ! grep -e "-=NAT64=-" /etc/resolv.conf >/dev/null; then
+		cp -f /etc/resolv.conf /etc/resolv.conf--pre-nat64
+	fi
 	filter='tee /etc/resolv.conf--nat64'
 fi
-
 # Real update
-T="$(mktemp)"
-grep -v "^nameserver" /etc/resolv.conf > "$T"
-(cat "$T"; echo "nameserver $DNS64") | $filter > /etc/resolv.conf
+
+cat "$T" | $filter > /etc/resolv.conf
 
 msg "DNS64 is now enabled. (use ${ME%%-*}-off to disable)"
 

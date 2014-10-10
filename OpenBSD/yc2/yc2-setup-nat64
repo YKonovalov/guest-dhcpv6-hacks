@@ -56,5 +56,6 @@ EOF
  
 if ! grep ipv46_nat64_autoconf /etc/rc.local >/dev/null; then
     echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 4)' >>/etc/rc.local
+    echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_wait_for_defroute 6)' >>/etc/rc.local
     echo '(PATH=$PATH:/usr/local/sbin:/usr/local/bin ipv46_nat64_autoconf)' >>/etc/rc.local
 fi
