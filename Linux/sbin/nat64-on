@@ -70,12 +70,13 @@ enable_ra(){
 		dolog "unable to set maxplen for $iface"
 		return 1
 	fi
+	echo "net.ipv6.conf.${iface}.accept_ra_rt_info_max_plen=96" > /etc/sysctl.d/10-rio-nat64.conf
 }
 
 precheck(){
 	local iface=${1:-eth0}
 	if ! check_ra $iface; then
-		msg "RA is disabled on $iface. Will scan without enabling RA."
+		msg "RA is disabled on $iface. NAT64 routes will not be discovered by kernel. Will try to scan from userspace without enabling RA."
 		disc="$(rdisc6 $iface|awk -v preffix="$NAT64_PREFFIX" '$1=="Route" && $2==":" && $3==preffix {P=$3;next}; $1=="from" && P!="" {print P" "$2;P="";next}')"
 		if [ -z "$disc" ]; then
 			msg "Scan on $iface gave no NAT64 routers. Exiting"
@@ -93,14 +94,18 @@ precheck(){
 			msg "ip -6 route add $NAT64_PREFFIX via $r dev $iface"
 			ip -6 route add $NAT64_PREFFIX via $r dev $iface
 		done
-	else
+	elif ! check_ra_max_plen $iface; then
 		msg "Enabling IPv6 route information support (RA-RIO) on $iface"
 		if ! enable_ra $iface; then
 			return 1
 		fi
-		msg "Force route discovery"
-		R=$(rdisc6 -n -q $iface | grep "$NAT64_PREFFIX"|grep -v "^$"|wc -l)
+	fi
+	msg "Force route discovery"
+	R=$(rdisc6 -n -q $iface | grep "$NAT64_PREFFIX"|grep -v "^$"|wc -l)
+	if [ $R -gt 0 ]; then
 		msg "There are $R NAT64 routers on the network"
+	else
+		msg "No NAT64 routers found. It may take some time to appear. Run me again to check."
 	fi
 }
 

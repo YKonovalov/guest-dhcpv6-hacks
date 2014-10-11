@@ -117,8 +117,14 @@ $AS \\
 
 	msg "Announcing NAT64 Route Information and DNS64 on $iface using RA-RIO"
 	pkill rtadvd
-	echo "$nat64_iface:raflags=\"mo\":rltime#0:pinfoflags#0:mtu#1450:addr=\"64:ff9b::\":prefixlen#96:rtprefix=\"64:ff9b::\":rtplen#96:rtltime#1800:rdnss=\"$ipv6_ip\":" > /etc/rtadvd.conf--nat64
+	echo "$nat64_iface:raflags=#192:rltime#0:pinfoflags#0:mtu#1450:addr=\"64:ff9b::\":prefixlen#96:rtprefix=\"64:ff9b::\":rtplen#96:rtltime#1800:rdnss=\"$ipv6_ip\":" > /etc/rtadvd.conf--nat64
 	rtadvd -s -c /etc/rtadvd.conf--nat64 $nat64_iface
+
+	msg "Starting DNS64 AAAA-only server"
+	pkill named
+	sleep 3
+	/usr/local/sbin/named -c /etc/named-nat64.conf
+	/usr/local/sbin/named -c /etc/named-aaaa-only.conf
 
 	msg ""
 	msg "HINT: On the host you need to add NAT64 route and use DNS64 nameserver above"
