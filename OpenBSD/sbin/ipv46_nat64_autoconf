@@ -104,8 +104,8 @@ for i in `seq 12`; do
 	msg "  Translation IPv6 interface: $nat64_iface"
 	msg "                 Public IPv4: $ipv4_ip"
 	msg ""
-	msg "   Router IPv6LL for NAT64 on $iface: ${ipv6ll_ip%%%*}"
-	msg "     Public IPv6 for DNS64 on $iface: $ipv6_ip"
+	msg "   Router IPv6LL for NAT64 on $nat64_iface: ${ipv6ll_ip%%%*}"
+	msg "     Public IPv6 for DNS64 on $nat64_iface: $ipv6_ip"
 	msg ""
 
 	msg "Applying nat64 rules"
@@ -115,7 +115,7 @@ $AS \\
 " > /etc/pf.conf--auto
 	pfctl -f /etc/pf.conf--auto
 
-	msg "Announcing NAT64 Route Information and DNS64 on $iface using RA-RIO"
+	msg "Announcing NAT64 Route Information and DNS64 on $nat64_iface using RA-RIO"
 	pkill rtadvd
 	echo "$nat64_iface:raflags=#192:rltime#0:pinfoflags#0:mtu#1450:addr=\"64:ff9b::\":prefixlen#96:rtprefix=\"64:ff9b::\":rtplen#96:rtltime#1800:rdnss=\"$ipv6_ip\":" > /etc/rtadvd.conf--nat64
 	rtadvd -s -c /etc/rtadvd.conf--nat64 $nat64_iface
