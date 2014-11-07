@@ -26,12 +26,15 @@ duid_dhclient(){
  local lease_file="$1"
     duid="default-duid \"\000\004"
     for i in $UUID; do
-	num=`printf "%d" 0x$i`
-	octnum=`printf "\%03o" 0x$i`
-	if [ $num -lt 127 -a $num -gt 31 ]; then
-	    octnum=`printf $octnum`
-	fi
-	duid=$duid$octnum
+        num=`printf "%d" 0x$i`
+        octnum=`printf "\%03o" 0x$i`
+        if [ $num -lt 127 -a $num -gt 31 ]; then
+            octnum=`printf $octnum`
+        fi
+        if [ $num -eq 34 ]; then
+            octnum='\'"$octnum"
+        fi
+        duid=$duid$octnum
     done
     duid="$duid\";"
 
