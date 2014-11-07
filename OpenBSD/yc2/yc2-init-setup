@@ -4,13 +4,13 @@
 ## Customization done to base QCOW image:
 #
 
-pkg_add -I curl wget scapy avahi dmidecode isc-dhcp-client mc bash rsync base64 lsof coreutils
+pkg_add -I curl wget scapy avahi dmidecode isc-dhcp-client mc bash rsync base64 lsof coreutils dhcpcd
 [ -L /usr/local/bin/seq ] || ln -s /usr/local/bin/gseq /usr/local/bin/seq
 
 (cd; wget http://roy.marples.name/downloads/openresolv/openresolv-3.5.7.tar.bz2 && tar jxvf openresolv-3.5.7.tar.bz2 && cd openresolv-3.5.7 && ./configure && make install && cd ../ && rm -rf openresolv-3.5.7 && rm -f openresolv-3.5.7.tar.bz2)
-(cd; wget http://roy.marples.name/downloads/dhcpcd/dhcpcd-6.4.7.tar.bz2 &&
-    tar jxvf dhcpcd-6.4.7.tar.bz2 && cd dhcpcd-6.4.7 && ./configure && make && make install && cd ../ &&
-    rm -rf dhcpcd-6.4.7 && rm -f dhcpcd-6.4.7.tar.bz2)
+#(cd; wget http://roy.marples.name/downloads/dhcpcd/dhcpcd-6.4.7.tar.bz2 &&
+#    tar jxvf dhcpcd-6.4.7.tar.bz2 && cd dhcpcd-6.4.7 && ./configure && make && make install && cd ../ &&
+#    rm -rf dhcpcd-6.4.7 && rm -f dhcpcd-6.4.7.tar.bz2)
 
 [ -f /etc/dhcpcd.conf--orig ] || cp /etc/dhcpcd.conf /etc/dhcpcd.conf--orig
 sed "s/^\(slaac private.*\)/slaac hwaddr/" /etc/dhcpcd.conf--orig > /etc/dhcpcd.conf
@@ -18,8 +18,10 @@ echo "script /usr/local/sbin/dhclient-script-resolvconf" >> /etc/dhcpcd.conf
 
 cat > /etc/hostname.vio0 << \EOF
 up
+!ifconfig $if inet6 -autoconfprivacy -autoconf
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin duid-uuid-update $if)
-!/sbin/dhcpcd -4 $if
+!/usr/local/sbin/dhcpcd -4 $if
+!(while ifconfig $if inet6|grep tentative >/dev/null; do sleep 1; echo "waiting for linklocal on $if"; done)
 !/usr/local/sbin/dhclient -6 -nw -pf /var/run/dhclient6.$if.pid -lf /var/db/dhclient6.$if.leases $if
 !(PATH=$PATH:/usr/local/sbin:/usr/local/bin ndisc_update &)&
 EOF

@@ -122,8 +122,9 @@ if [ "$old_ll" = "$new_ll" ]; then
 	exit 0
 fi
 
-ifconfig $IFACE inet6 $new_ll prefixlen 64
-ifconfig $IFACE inet6 $old_ll -alias
-ifconfig $IFACE inet6 $global_deprecated prefixlen 64 tentative pltime 0
-ifconfig $IFACE down
-ifconfig $IFACE up
+# Not needed in OpenBSD 5.6
+#ifconfig $IFACE inet6 $new_ll prefixlen 64
+#ifconfig $IFACE inet6 $old_ll -alias
+#ifconfig $IFACE inet6 $global_deprecated prefixlen 64 tentative pltime 0
+#ifconfig $IFACE down
+#ifconfig $IFACE up
