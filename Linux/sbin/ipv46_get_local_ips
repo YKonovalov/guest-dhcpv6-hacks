@@ -1,0 +1,1 @@
+ip a s scope global|awk '{if($1~"(inet|inet6)")print $2}'|cut -d'/' -f1
